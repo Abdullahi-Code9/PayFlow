@@ -178,3 +178,34 @@ try {
     }
 }
 ```
+
+---
+
+## 8. Paginating Charge History
+
+`get_charge_history_page(user, offset, limit)` reads from `ChargeHistory(user)`, a `Vec<u64>` capped at the 12 most recent charge timestamps (oldest → newest, FIFO). `limit` is silently capped at 12, and an `offset` past the end of the history returns an empty array rather than an error — there is no `ascending` flag, so "most recent first" has to be computed client-side from the returned oldest-to-newest slice.
+
+The full mechanics — ring buffer diagram, worked examples, and an offset/limit reference table — live in [API.md § `get_charge_history_page` → Pagination Guide](./API.md#pagination-guide). The `loadAllChargeHistory()` pagination-loop example there is the recommended building block for a "load all history" or infinite-scroll UI, since it keeps working even if the on-chain retention cap changes later.
+
+```javascript
+async function getChargeHistoryPage(userAddress, offset, limit) {
+  const source = await server.getAccount(userAddress);
+
+  const tx = new TransactionBuilder(source, { fee: '1000', networkPassphrase: Networks.TESTNET })
+    .addOperation(
+      payFlowContract.call('get_charge_history_page',
+        xdr.ScVal.scvAddress(userAddress),
+        xdr.ScVal.scvU32(offset),
+        xdr.ScVal.scvU32(limit)
+      )
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if ('error' in sim) throw new Error(sim.error);
+
+  // sim.result.retval decodes to a Vec<u64> of charge timestamps (oldest → newest).
+  return sim.result.retval;
+}
+```
