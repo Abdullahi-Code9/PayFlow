@@ -1,6 +1,6 @@
 # Contract API Reference
 
-This document tracks the current public contract surface in [contract/src/lib.rs](../contract/src/lib.rs). For error codes, see [ERROR-CODES.md](./ERROR-CODES.md), which contains the CONTRACT-34 table. For events, see [EVENTS.md](./EVENTS.md).
+This document tracks the current public contract surface in [contract/src/lib.rs](../contract/src/lib.rs). For error codes, see [ERROR-CODES.md](./ERROR-CODES.md), which contains the CONTRACT-34 table. For events, see [EVENTS.md](./EVENTS.md). For the propose/commit and propose/accept pattern shared by `transfer_admin`/`accept_admin`, `propose_fee`/`commit_fee`, `propose_grace_period`/`commit_grace_period`, and `propose_upgrade`/`commit_upgrade`, see [architecture/two-step-auth.md](./architecture/two-step-auth.md).
 
 ---
 
