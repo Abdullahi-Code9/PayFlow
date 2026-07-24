@@ -1344,6 +1344,152 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_charge_history_page --user <USER_ADDRESS> --offset 0 --limit 12
 ```
 
+#### Pagination Guide
+
+`ChargeHistory(user)` is a `Vec<u64>` of up to 12 charge timestamps, stored **oldest → newest**. Every successful `charge()` appends a timestamp; once the vector holds 12 entries, the next append drops entry `0` (the oldest) before pushing the new one. In other words, storage itself is the ring buffer — `get_charge_history_page` just slices whatever is currently in it. There is no separate "total charge count" stored anywhere; the longest history you can ever page through is 12 entries, because older charges are physically gone.
+
+**Slicing algorithm (from [`subscription_history.rs`](../contract/src/subscription_history.rs)):**
+
+```rust
+effective_limit = min(limit, 12)
+if offset >= history.len() { return [] }          // empty, not an error
+end = min(offset + effective_limit, history.len())
+return history[offset..end]                        // oldest → newest
+```
+
+`limit` is silently capped at 12 — passing `limit: 100` is safe and simply returns everything available. `offset` is never validated against the history length beyond the empty-result check above; there is no `IndexOutOfBounds`-style error anywhere in this path.
+
+> **No `ascending` parameter.** The current contract signature is `get_charge_history_page(user, offset, limit)` — there is no direction flag. Results are always returned oldest-first. To read the **most recent** N charges, compute `offset` yourself from the total history length (see Example 2).
+
+**Ring buffer diagram** — a subscriber with 14 total lifetime charges (`c1`..`c14`). Only the last 12 survive:
+
+```
+ lifetime charges:  c1  c2  c3 [c4  c5  c6  c7  c8  c9  c10 c11 c12 c13 c14]
+                     ↑   ↑   ↑   └──────────────── retained (12 slots) ────────────────┘
+                  evicted (FIFO, oldest dropped first as new charges arrive)
+
+ ChargeHistory(user) in storage (index 0 = oldest):
+
+   index:   0    1    2    3    4    5    6    7    8    9    10   11
+   value:  [c4,  c5,  c6,  c7,  c8,  c9, c10, c11, c12, c13, c14]  (len = 11 here, one slot short of the cap)
+
+ get_charge_history_page(user, offset=8, limit=3)
+                                    │
+                     slices index [8..11) ─┐
+                                            ▼
+                                        [c12, c13, c14]
+```
+
+##### Worked examples
+
+*Example 1 — fetch everything (`offset=0, limit=12`):*
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- \
+  get_charge_history_page --user <USER_ADDRESS> --offset 0 --limit 12
+```
+
+With a history of `[c4..c14]` (11 entries), this returns all 11 entries, oldest to newest. If the subscriber has fewer than 12 charges total, one call is always enough — you never need a second page.
+
+*Example 2 — most recent 5 records (no `ascending` param, so compute the offset):*
+
+```typescript
+const all = await getChargeHistoryPage(user, 0, 12); // at most 12 entries ever exist
+const mostRecent5 = all.slice(-5); // last 5 = newest 5, since storage is oldest → newest
+```
+
+Equivalently, on-chain: `offset = max(0, total - 5)`, `limit = 5`. If `total = 11`, call `get_charge_history_page(user, 6, 5)` to get entries `[6..11)`.
+
+*Example 3 — offset beyond the record count (returns empty, not an error):*
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- \
+  get_charge_history_page --user <USER_ADDRESS> --offset 5 --limit 2
+```
+
+For a subscriber with only 1 recorded charge, `offset=5 >= len(1)` so this returns `[]`. This mirrors the covering test [`test_get_charge_history_page_offset_beyond_length`](../contract/src/test.rs).
+
+**Offset / limit reference table** (history has 11 entries, `c4`..`c14`, oldest → newest):
+
+| `offset` | `limit` | Result | Notes |
+| --- | --- | --- | --- |
+| `0` | `12` | `[c4..c14]` (11 items) | `limit` capped at 12, but history only has 11 |
+| `0` | `5` | `[c4, c5, c6, c7, c8]` | oldest 5 |
+| `6` | `5` | `[c10, c11, c12, c13, c14]` | newest 5 (see Example 2) |
+| `11` | `5` | `[]` | `offset == len`, empty result |
+| `20` | `5` | `[]` | `offset > len`, empty result, no error |
+| `9` | `100` | `[c13, c14]` | `limit` capped then clamped to remaining length |
+
+##### "Load all history" with a pagination loop (TypeScript)
+
+Because storage never holds more than 12 entries, a single call with `limit: 12` already returns everything. The loop below is still useful as the general-purpose pattern for infinite-scroll style UIs, and keeps working unmodified if the on-chain cap is ever raised. It calls the contract the same way [`getSubscription`](../frontend/src/stellar.ts) does — build, simulate, decode:
+
+```typescript
+import { Contract, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
+import { server, CONTRACT_ID, NETWORK_PASSPHRASE } from "./stellar";
+import { ScValDecoder } from "./services/scval";
+
+function addressVal(addr: string): xdr.ScVal {
+  return nativeToScVal(Address.fromString(addr), { type: "address" });
+}
+
+/** Fetches one page of charge timestamps via get_charge_history_page. */
+async function getChargeHistoryPage(
+  user: string,
+  offset: number,
+  limit: number
+): Promise<number[]> {
+  const contract = new Contract(CONTRACT_ID);
+  const account = await server.getAccount(user);
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call(
+        "get_charge_history_page",
+        addressVal(user),
+        nativeToScVal(offset, { type: "u32" }),
+        nativeToScVal(limit, { type: "u32" })
+      )
+    )
+    .setTimeout(30)
+    .build();
+
+  const result = await server.simulateTransaction(tx);
+  if ("error" in result) throw new Error((result as { error: string }).error);
+
+  const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+  if (!retval) return [];
+
+  return retval.vec()?.map((v) => Number(ScValDecoder.decodeU64(v))) ?? [];
+}
+
+/**
+ * Loads the subscriber's full charge history by paging until an empty
+ * (or short) page comes back. Safe to call even though today's 12-record
+ * cap means it will always resolve after a single request.
+ */
+async function loadAllChargeHistory(user: string): Promise<number[]> {
+  const PAGE_SIZE = 12; // matches the contract's MAX_HISTORY cap
+  const all: number[] = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await getChargeHistoryPage(user, offset, PAGE_SIZE);
+    all.push(...page);
+
+    if (page.length < PAGE_SIZE) break; // short page = no more records
+    offset += page.length;
+  }
+
+  return all;
+}
+```
+
+See [INTEGRATION-GUIDE.md § 8 — Paginating Charge History](./INTEGRATION-GUIDE.md#8-paginating-charge-history) for the same pattern in a full integration walkthrough.
+
 ### `transfer_subscription`
 
 ```

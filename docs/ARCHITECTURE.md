@@ -137,6 +137,7 @@ FlowPay uses Soroban instance, persistent, and temporary storage deliberately.
 Persistent entries that must remain available are refreshed with TTL extensions where needed, most importantly subscription records and selected merchant-revenue data. Temporary entries are used for short-lived proposals and daily spending caps.
 
 `PendingAdmin`, `PendingFee`, `PendingGracePeriod`, and (not shown above) `PendingUpgrade` all back a propose/commit or propose/accept two-step authorization flow rather than an instant admin action. See [architecture/two-step-auth.md](./architecture/two-step-auth.md) for the security rationale and a state diagram per flow.
+Each `Subscription(user)` record carries its own `token` address rather than sharing one contract-wide token, which is what lets a single deployment serve subscribers paying in different SAC tokens. See [MULTI-TOKEN.md](./MULTI-TOKEN.md) for the full architecture, deployment models, and fee implications.
 
 ---
 
