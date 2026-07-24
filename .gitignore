@@ -191,6 +191,9 @@ config/local.json
 .agents/
 .claude/
 skills-lock.json
+
+# Generated testnet test-fixture manifests (contain throwaway testnet secret keys)
+scripts/.testnet-manifest.*.json
 issue.mdkiro-cli.deb
 kiro-cli.deb.1
 .antigravitycli/
