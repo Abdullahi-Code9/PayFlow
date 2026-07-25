@@ -97,6 +97,8 @@ pub enum DataKey {
     PendingUpgrade,
     // Feature: pause expiry (bounded pause with auto-resume)
     PauseExpiry(Address),
+    // Feature: cumulative protocol fees collected across all merchants
+    TotalProtocolFees,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -782,6 +784,12 @@ impl FlowPay {
 
     pub fn get_fee_collector(env: Env) -> Option<Address> {
         fee::get_fee_collector(&env)
+    }
+
+    /// Returns the cumulative protocol fees collected across all merchants,
+    /// accumulated from every `charge()` and `pay_per_use()` call.
+    pub fn get_total_protocol_fees(env: Env) -> i128 {
+        fee::get_total_protocol_fees(&env)
     }
 
     pub fn get_subscription(env: Env, user: Address) -> Option<Subscription> {
