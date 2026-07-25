@@ -636,6 +636,8 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --source <ADMIN_KEY> --network testnet -- add_merchant --merchant <MERCHANT_ADDRESS>
 ```
 
+*See also: [Merchant Integration Cookbook — Getting Started](./MERCHANT-INTEGRATION.md#1-getting-started) for whitelist request flow.*
+
 ### `remove_merchant`
 
 ```
@@ -994,6 +996,24 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_merchant_subscriber_count --merchant <MERCHANT_ADDRESS>
 ```
 
+### `get_merchant_sub_count`
+
+```
+get_merchant_sub_count(env: Env, merchant: Address) -> u32
+```
+
+Auth: none.
+
+Returns: `u32` — active subscriber count for `merchant` (same `MerchantSubCount` storage as `get_merchant_subscriber_count`, narrowed to `u32`).
+
+CLI example:
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_merchant_sub_count --merchant <MERCHANT_ADDRESS>
+```
+
+*See also: [Merchant Integration Cookbook — Monitoring Subscribers](./MERCHANT-INTEGRATION.md#3-monitoring-subscribers).*
+
 ### `reset_merchant_revenue`
 
 ```
@@ -1031,6 +1051,8 @@ CLI example:
 ```bash
 soroban contract invoke --id <CONTRACT_ID> --source <MERCHANT_KEY> --network testnet -- withdraw_merchant_revenue --merchant <MERCHANT_ADDRESS>
 ```
+
+*See also: [Merchant Integration Cookbook](./MERCHANT-INTEGRATION.md) for the full merchant onboarding → revenue → withdraw path.*
 
 ### `set_daily_limit`
 
@@ -1516,7 +1538,7 @@ All amounts are in stroops. 1 XLM = 10,000,000 stroops. Intervals are
 
 ## Events Reference
 
-See [EVENTS.md](./EVENTS.md) for the complete event schema reference.
+See [EVENTS.md](./EVENTS.md) for the complete event schema reference. For building keepers, analytics, notifications, or reconciliation jobs on top of those events, see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 **Parameters**
 
@@ -2404,7 +2426,7 @@ All intervals are in **seconds**.
 
 All events can be indexed by listening to the Stellar RPC event stream for the FlowPay contract ID.
 
-For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md).
+For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md). For consumption patterns (polling, deduplication, reaction, reliability), see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 | Event name | Topic | Data |
 | --- | --- | --- |
