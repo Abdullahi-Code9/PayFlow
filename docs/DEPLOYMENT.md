@@ -188,3 +188,10 @@ FlowPay does not support automatic rollback. To revert to a previous WASM:
 | `VITE_CONTRACT_ID` | Yes | `""` | Deployed contract ID |
 | `VITE_RPC_URL` | No | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint |
 | `VITE_NETWORK_PASSPHRASE` | No | `Networks.TESTNET` | Stellar network passphrase |
+
+---
+
+## Related operations
+
+- Keeper bot setup and cadence: [`docs/KEEPER.md`](KEEPER.md)
+- Advanced keeper scenarios (DLQ replay, multi-instance locks, RPC failover, incident pause): [`docs/operations/keeper_runbook.md`](operations/keeper_runbook.md)
