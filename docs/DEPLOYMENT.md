@@ -63,6 +63,12 @@ VITE_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 
 > **Warning:** FlowPay has not been formally audited. Do not manage real funds on Mainnet until an independent security audit is complete.
 
+FlowPay is currently deployed on **Testnet only**. When you are ready for Mainnet, follow the full phased checklist (security gates, key management, pre-deploy verification, deploy commands, post-deploy smoke tests, and go-live):
+
+**→ [`MAINNET-DEPLOYMENT.md`](MAINNET-DEPLOYMENT.md)**
+
+Quick script form (only after audit + checklist Phase 0–1):
+
 ```bash
 bash scripts/deploy.sh --network mainnet --source <DEPLOYER_KEYPAIR> --token <SAC_ADDRESS>
 ```
