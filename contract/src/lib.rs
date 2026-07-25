@@ -83,6 +83,10 @@ pub enum DataKey {
     // Feature: subscriber index (append-only log)
     SubscriberIndex(u64),
     SubscriberIndexSize,
+    // Reverse lookup of a subscriber's slot, used to prune on cancel
+    SubscriberIndexSlot(Address),
+    // Tombstone marking a pruned (cancelled) subscriber index slot
+    SubscriberIndexRemoved(u64),
     // Feature: per-merchant subscriber count
     MerchantSubCount(Address),
     // Pending admin for two-step transfer
@@ -195,6 +199,7 @@ fn cancel_inner(env: &Env, user: &Address) -> Subscription {
     extend_subscription_ttl(env, user);
 
     subscription_count::decrement(env);
+    subscription_count::remove_subscriber_index(env, user);
     merchant_stats::decrement_subscriber_count(env, &sub.merchant);
     referral::remove_referral(env, user);
 
@@ -1153,15 +1158,20 @@ impl FlowPay {
         subscription_count::get_subscriber_index_size(&env)
     }
 
-    /// Returns the subscriber address at the given index slot, or `None` if out of range.
+    /// Returns the subscriber address at the given index slot, or `None` if
+    /// out of range or the slot has been pruned (cancelled subscriber).
     pub fn get_subscriber_at(env: Env, index: u64) -> Option<Address> {
+        if subscription_count::is_subscriber_index_removed(&env, index) {
+            return None;
+        }
         env.storage()
             .persistent()
             .get(&DataKey::SubscriberIndex(index))
     }
 
     /// Returns a page of subscriber addresses starting at `offset`, capped at 50 per call.
-    /// Returns an empty Vec when `offset >= count` or `limit == 0`.
+    /// Pruned (cancelled) slots are skipped. Returns an empty Vec when
+    /// `offset >= count` or `limit == 0`.
     pub fn get_subscriber_page(env: Env, offset: u64, limit: u32) -> Vec<Address> {
         let count = subscription_count::get_subscriber_index_size(&env);
         let cap: u32 = if limit > 50 { 50 } else { limit };
@@ -1172,8 +1182,10 @@ impl FlowPay {
         let mut i = offset;
         let end = offset + cap as u64;
         while i < end && i < count {
-            if let Some(addr) = env.storage().persistent().get(&DataKey::SubscriberIndex(i)) {
-                result.push_back(addr);
+            if !subscription_count::is_subscriber_index_removed(&env, i) {
+                if let Some(addr) = env.storage().persistent().get(&DataKey::SubscriberIndex(i)) {
+                    result.push_back(addr);
+                }
             }
             i += 1;
         }
