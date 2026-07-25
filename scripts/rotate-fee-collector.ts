@@ -6,12 +6,14 @@ import readline from "readline";
 async function get_fee(): Promise<{ collector: string; fee_bps: number }> {
   // Simulates fetching current fee config
   console.log("Fetching current fee configuration...");
-  return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 }; 
+  return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 };
 }
 
 async function set_fee(newCollector: string, feeBps: number): Promise<void> {
   // Simulates executing the contract transaction
-  console.log(`Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`);
+  console.log(
+    `Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`,
+  );
 }
 
 const rl = readline.createInterface({
@@ -51,7 +53,9 @@ async function main() {
 
   // Acceptance Criteria: Prompts for confirmation (unless --yes flag)
   if (!autoConfirm) {
-    const answer = await question("Are you sure you want to rotate the fee collector? (y/N): ");
+    const answer = await question(
+      "Are you sure you want to rotate the fee collector? (y/N): ",
+    );
     rl.close();
     if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
       console.log("Operation aborted by user.");
@@ -70,12 +74,16 @@ async function main() {
   // Acceptance Criteria: Verifies change by reading get_fee after update
   console.log("\n=== Verifying On-Chain Update ===");
   const updatedFee = await get_fee();
-  
+
   if (updatedFee.collector === newCollector) {
     console.log("✅ Success: Fee collector rotated correctly!");
-    console.log(`New Verification -> Collector: ${updatedFee.collector}, BPS: ${updatedFee.fee_bps}`);
+    console.log(
+      `New Verification -> Collector: ${updatedFee.collector}, BPS: ${updatedFee.fee_bps}`,
+    );
   } else {
-    console.error("❌ Error: Verification failed. Collector address does not match expected update.");
+    console.error(
+      "❌ Error: Verification failed. Collector address does not match expected update.",
+    );
     process.exit(1);
   }
 }

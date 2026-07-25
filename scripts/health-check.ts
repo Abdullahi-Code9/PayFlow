@@ -20,20 +20,32 @@
  *   1 — unhealthy (one or more calls failed or returned invalid data)
  */
 
-import { Contract, Networks, TransactionBuilder, BASE_FEE, Address } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Contract,
+  Networks,
+  TransactionBuilder,
+  BASE_FEE,
+  Address,
+} from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-const CONTRACT_ID = process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
-const RPC_URL = process.env.RPC_URL || process.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID =
+  process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
+const RPC_URL =
+  process.env.RPC_URL ||
+  process.env.VITE_RPC_URL ||
+  "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
   process.env.NETWORK === "mainnet"
     ? Networks.PUBLIC
     : process.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET;
 
 // A zero-funded source account used solely for simulating read-only calls.
-const SIMULATION_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const SIMULATION_SOURCE =
+  "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,7 +69,7 @@ async function simulateCall(server: Server, fnName: string): Promise<unknown> {
   const contract = new Contract(CONTRACT_ID);
   const account = await server.getAccount(SIMULATION_SOURCE).catch(() => {
     // For simulation-only calls, build a synthetic account if lookup fails.
-    return new (await import("@stellar/stellar-sdk")).Account(SIMULATION_SOURCE, "0");
+    return new Account(SIMULATION_SOURCE, "0");
   });
 
   const tx = new TransactionBuilder(account, {

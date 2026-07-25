@@ -96,16 +96,25 @@ function loadEnv(projectRoot: string): Map<string, string> {
  * Validate that a value is a Stellar contract ID.
  * Contract IDs begin with 'C' and are exactly 56 characters (base32-encoded).
  */
-function validateContractId(value: string): { valid: boolean; reason?: string } {
+function validateContractId(value: string): {
+  valid: boolean;
+  reason?: string;
+} {
   if (!value.startsWith("C")) {
     return { valid: false, reason: "must start with 'C'" };
   }
   if (value.length !== 56) {
-    return { valid: false, reason: `must be 56 characters (got ${value.length})` };
+    return {
+      valid: false,
+      reason: `must be 56 characters (got ${value.length})`,
+    };
   }
   // Stellar contract IDs use uppercase base32 (A-Z, 2-7)
   if (!/^[A-Z2-7]+$/.test(value)) {
-    return { valid: false, reason: "contains invalid characters (expected base32: A-Z, 2-7)" };
+    return {
+      valid: false,
+      reason: "contains invalid characters (expected base32: A-Z, 2-7)",
+    };
   }
   return { valid: true };
 }
@@ -157,7 +166,7 @@ const REQUIRED_VARIABLES: Array<{ name: string; validators: Validator[] }> = [
 function validateVariable(
   name: string,
   envVars: Map<string, string>,
-  validators: Validator[]
+  validators: Validator[],
 ): ValidationResult {
   const value = envVars.get(name);
 

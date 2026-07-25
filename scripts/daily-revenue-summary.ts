@@ -54,7 +54,7 @@ function utcDayBounds(dateStr: string): { startMs: number; endMs: number } {
 function previousUtcDay(): string {
   const now = new Date();
   const yesterday = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
   );
   return yesterday.toISOString().slice(0, 10);
 }
@@ -94,7 +94,7 @@ function main(): void {
 
   const query = db.prepare(
     `SELECT event_name, data FROM events
-     WHERE timestamp >= ? AND timestamp < ?`
+     WHERE timestamp >= ? AND timestamp < ?`,
   );
 
   const rows = query.all(startSec, endSec) as Array<{

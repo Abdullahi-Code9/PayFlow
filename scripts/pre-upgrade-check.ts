@@ -26,10 +26,8 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 // ── Config ───────────────────────────────────────────────────────────────────
 
 const CONTRACT_ID = process.env.CONTRACT_ID ?? "";
-const RPC_URL =
-  process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE =
-  process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET;
+const RPC_URL = process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
+const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET;
 
 // Dummy source account used solely for simulation (no auth needed)
 const SIM_SOURCE = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
@@ -40,7 +38,10 @@ const CONFIRM = process.argv.includes("--confirm");
 
 const server = new Server(RPC_URL);
 
-async function simulateReadOnly(method: string, ...args: xdr.ScVal[]): Promise<xdr.ScVal> {
+async function simulateReadOnly(
+  method: string,
+  ...args: xdr.ScVal[]
+): Promise<xdr.ScVal> {
   const contract = new Contract(CONTRACT_ID);
   const sourceAccount = new Account(SIM_SOURCE, "0");
 
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
 
   if (Number(activeCount) > 0) {
     console.warn(
-      `  ⚠  ${activeCount} active subscription(s) will be affected by a storage migration.`
+      `  ⚠  ${activeCount} active subscription(s) will be affected by a storage migration.`,
     );
   }
 
@@ -113,14 +114,18 @@ async function main(): Promise<void> {
   const schemaVersion = scValToString(versionVal);
   console.log(`Schema version     : ${schemaVersion}`);
   if (Number(schemaVersion) < 2) {
-    console.warn("  ⚠  Schema is below current version 2 — run migrate() after upgrading.");
+    console.warn(
+      "  ⚠  Schema is below current version 2 — run migrate() after upgrading.",
+    );
   }
 
   console.log("");
 
   // 4. Confirmation gate
   if (!CONFIRM) {
-    console.log("Checks complete. Re-run with --confirm to proceed with the upgrade.");
+    console.log(
+      "Checks complete. Re-run with --confirm to proceed with the upgrade.",
+    );
     process.exit(0);
   }
 
@@ -128,6 +133,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("Pre-upgrade check failed:", err instanceof Error ? err.message : err);
+  console.error(
+    "Pre-upgrade check failed:",
+    err instanceof Error ? err.message : err,
+  );
   process.exit(1);
 });

@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "watch-events": "tsx watch-events.ts",
-    "check-allowances": "tsx check-allowances.ts"
+    "check-allowances": "tsx check-allowances.ts",
+    "alert-expiring-allowances": "tsx alert-expiring-allowances.ts",
+    "indexer": "tsx indexer.ts",
+    "query-events": "tsx query-events.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.0.0"

@@ -21,12 +21,13 @@ import {
 
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
-const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET) as string;
+const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ??
+  Networks.TESTNET) as string;
 
 if (!CONTRACT_ID) {
   console.error("Error: CONTRACT_ID environment variable is required");
   console.error(
-    "Usage: CONTRACT_ID=your_contract_id tsx check-allowances.ts [--file subscribers.txt] [--json] [address1 address2 ...]"
+    "Usage: CONTRACT_ID=your_contract_id tsx check-allowances.ts [--file subscribers.txt] [--json] [address1 address2 ...]",
   );
   process.exit(1);
 }
@@ -85,8 +86,13 @@ function addressVal(addr: string): xdr.ScVal {
 }
 
 async function getSubscription(
-  user: string
-): Promise<{ amount: bigint; token: string; active: boolean; paused: boolean } | null> {
+  user: string,
+): Promise<{
+  amount: bigint;
+  token: string;
+  active: boolean;
+  paused: boolean;
+} | null> {
   try {
     const contract = new Contract(CONTRACT_ID);
     const account = await server.getAccount(user);
@@ -102,7 +108,8 @@ async function getSubscription(
     const result = await server.simulateTransaction(tx);
     if ("error" in result) return null;
 
-    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result
+      ?.retval;
     if (!retval || retval.switch().name === "scvVoid") return null;
 
     const fields: Record<string, unknown> = {};
@@ -151,8 +158,8 @@ async function getAllowance(owner: string, tokenId: string): Promise<bigint> {
         tokenContract.call(
           "allowance",
           addressVal(owner),
-          nativeToScVal(FlowPayAddress, { type: "address" })
-        )
+          nativeToScVal(FlowPayAddress, { type: "address" }),
+        ),
       )
       .setTimeout(30)
       .build();
@@ -160,7 +167,8 @@ async function getAllowance(owner: string, tokenId: string): Promise<bigint> {
     const result = await server.simulateTransaction(tx);
     if ("error" in result) return 0n;
 
-    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result
+      ?.retval;
     if (!retval || retval.switch().name === "scvVoid") return 0n;
 
     return BigInt(retval.i128().toString());
@@ -277,14 +285,14 @@ function printHumanReadable(results: AuditResult[]): void {
     console.log(`${healthy.length} healthy:`);
     for (const r of healthy) {
       console.log(
-        `  ${r.address.padEnd(56)} ${stroopsToXlm(r.subscriptionAmount).padStart(10)} ${stroopsToXlm(r.allowance).padStart(10)}`
+        `  ${r.address.padEnd(56)} ${stroopsToXlm(r.subscriptionAmount).padStart(10)} ${stroopsToXlm(r.allowance).padStart(10)}`,
       );
     }
     console.log();
   }
 
   console.log(
-    `Summary: healthy=${healthy.length}, atRisk=${atRisk.length}, noSubscription=${noSub.length}`
+    `Summary: healthy=${healthy.length}, atRisk=${atRisk.length}, noSubscription=${noSub.length}`,
   );
 }
 
