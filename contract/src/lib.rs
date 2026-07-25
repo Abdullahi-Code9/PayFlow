@@ -1481,6 +1481,7 @@ impl FlowPay {
     pub fn transfer_subscription(env: Env, user: Address, new_user: Address) {
         ensure_contract_not_paused(&env);
         user.require_auth();
+        new_user.require_auth();
 
         let old_key = DataKey::Subscription(user.clone());
         let new_key = DataKey::Subscription(new_user.clone());
