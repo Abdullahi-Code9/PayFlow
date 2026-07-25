@@ -26,6 +26,14 @@ pub fn commit_upgrade(env: &Env) {
     events::publish_upgraded(env, &pending_hash);
 }
 
+/// Returns the WASM hash queued for the next upgrade, or `None` if no upgrade
+/// is pending.
+///
+/// No auth required — this is a view-only read of temporary storage.
+pub fn get_pending_upgrade(env: &Env) -> Option<BytesN<32>> {
+    env.storage().temporary().get(&DataKey::PendingUpgrade)
+}
+
 #[cfg(test)]
 pub fn upgrade(env: &Env, new_wasm_hash: BytesN<32>) {
     // Keep direct upgrade available for the test environment

@@ -14,6 +14,8 @@ import { useTransaction } from "../hooks/useTransaction";
 import { useVirtualList } from "../hooks/useVirtualList";
 import CopyButton from "./CopyButton";
 import RevenueSparkline from "./RevenueSparkline";
+import EventFeed from "./EventFeed";
+import SubscriptionExport from "./SubscriptionExport";
 
 const SUBSCRIBER_ROW_HEIGHT = 72;
 const SUBSCRIBER_LIST_HEIGHT = 400;
@@ -232,6 +234,39 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Real-time event feed for merchant activity (Issue #46) */}
+      <EventFeed
+        address={merchantKey}
+        eventName="charged"
+        title="Live Charge Events"
+        maxEvents={25}
+      />
+
+      {/* Subscriber data export (Issue #48) */}
+      {subscribers.length > 0 && (
+        <div className="card">
+          <div className="flex-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">Export Subscriber Data</h3>
+              <p className="text-sm text-muted">
+                Download subscriber list for accounting or external reporting.
+              </p>
+            </div>
+          </div>
+          <SubscriptionExport
+            data={subscribers.map((s) => ({
+              subscriber: s.subscriber,
+              amount_stroops: s.amount,
+              interval_seconds: s.interval,
+              last_charged: s.lastCharged,
+              next_charge_at: s.nextChargeAt,
+            }))}
+            filename={`subscribers-${merchantKey.slice(0, 8)}`}
+            label="Export Subscribers"
+          />
         </div>
       )}
     </div>

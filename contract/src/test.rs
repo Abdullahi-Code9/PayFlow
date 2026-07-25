@@ -2628,6 +2628,73 @@ fn test_upgrade_event_emitted() {
     let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic_symbol, Symbol::new(&env, "upgrade"));
 }
+
+// ─────────────────────────────────────────────────────────────
+// Issue #45: get_pending_upgrade tests
+// ─────────────────────────────────────────────────────────────
+
+/// Returns None when no upgrade has been proposed.
+#[test]
+fn test_get_pending_upgrade_none_when_not_proposed() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    assert_eq!(client.get_pending_upgrade(), None);
+}
+
+/// Returns the proposed WASM hash after propose_upgrade is called.
+#[test]
+fn test_get_pending_upgrade_returns_proposed_hash() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let new_wasm_hash = BytesN::from_array(&env, &[0xAB; 32]);
+    client.propose_upgrade(&new_wasm_hash);
+
+    assert_eq!(client.get_pending_upgrade(), Some(new_wasm_hash));
+}
+
+/// Returns None after commit_upgrade consumes the pending hash.
+#[test]
+fn test_get_pending_upgrade_none_after_commit() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let new_wasm_hash = BytesN::from_array(&env, &[0xCD; 32]);
+    client.propose_upgrade(&new_wasm_hash);
+
+    // Hash is visible before commit
+    assert_eq!(client.get_pending_upgrade(), Some(new_wasm_hash));
+
+    client.commit_upgrade();
+
+    // Cleared after commit
+    assert_eq!(client.get_pending_upgrade(), None);
+}
+
+/// A second propose_upgrade overwrites the first pending hash.
+#[test]
+fn test_get_pending_upgrade_overwritten_by_second_proposal() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let hash_a = BytesN::from_array(&env, &[0x01; 32]);
+    let hash_b = BytesN::from_array(&env, &[0x02; 32]);
+
+    client.propose_upgrade(&hash_a);
+    assert_eq!(client.get_pending_upgrade(), Some(hash_a));
+
+    client.propose_upgrade(&hash_b);
+    assert_eq!(client.get_pending_upgrade(), Some(hash_b));
+}
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Issue #96: referral tracking tests
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
