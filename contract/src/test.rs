@@ -2352,19 +2352,19 @@ fn test_get_day_start_visibility() {
     );
 
     // No window before any spend
-    assert!(!client.get_day_start(&user));
+    assert!(client.get_day_start(&user).is_none());
     assert_eq!(client.get_daily_spent(&user), 0);
 
     client.set_daily_limit(&user, &10_0000000);
     // Setting a limit alone does not open the day window
-    assert!(!client.get_day_start(&user));
+    assert!(client.get_day_start(&user).is_none());
 
     client.pay_per_use(&user, &2_0000000);
-    assert!(client.get_day_start(&user));
+    assert!(client.get_day_start(&user).is_some());
     assert_eq!(client.get_daily_spent(&user), 2_0000000);
 
     client.remove_daily_limit(&user);
-    assert!(!client.get_day_start(&user));
+    assert!(client.get_day_start(&user).is_none());
     assert_eq!(client.get_daily_spent(&user), 0);
 }
 
@@ -5795,4 +5795,86 @@ fn test_daily_limit_day_start_boundary() {
 
     // Should only be 15, not 35
     assert_eq!(client.get_daily_spent(&user), 15_0000000);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #2)")]
+fn test_subscription_amount_validation_zero() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    
+    // Attempt to set amount to 0 (panics with AmountMustBePositive, error 19)
+    env.mock_all_auths();
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    
+    client.set_subscription_amount(&user, &0);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #15)")]
+fn test_subscription_amount_validation_exceeds_max() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    
+    // Attempt to set amount above MAX_SUBSCRIPTION_AMOUNT
+    env.mock_all_auths();
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    
+    client.set_subscription_amount(&user, &(crate::MAX_SUBSCRIPTION_AMOUNT + 1));
+}
+
+#[test]
+fn test_batch_charge_estimate() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    
+    let users = soroban_sdk::vec![&env, user.clone()];
+    let estimate = client.get_batch_charge_estimate(&users);
+    
+    assert_eq!(estimate.len(), 1);
+    assert_eq!(estimate.get(0).unwrap(), crate::batch::ChargeResult::NoSubscription);
+}
+
+#[test]
+fn test_contract_config() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    
+    let config = client.get_contract_config();
+    assert_eq!(config.schema_version, 1);
+    assert_eq!(config.paused, false);
+}
+
+#[test]
+fn test_daily_spent_reset() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    
+    assert!(client.get_day_start(&user).is_none());
 }
