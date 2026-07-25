@@ -145,6 +145,17 @@ Project documentation.
 
 ```
 docs/
+├── ARCHITECTURE.md        # System design, data model, storage strategy
+├── DEPLOYMENT.md          # Build, deploy, keeper setup
+├── TESTING.md             # How to run and write tests
+├── API.md                 # Full contract function reference
+├── EVENTS.md              # Contract event payload/schema reference
+├── EVENT-DRIVEN-GUIDE.md  # Cookbook: consume events, dedupe, react, reliability
+├── INTEGRATION-GUIDE.md   # Third-party app integration
+├── KEEPER.md              # Keeper bot operations
+├── ONBOARDING.md          # First-issue contributor walkthrough
+├── STRUCTURE.md           # This file
+└── SECURITY.md            # Security model and disclosure policy
 ├── ARCHITECTURE.md          # System design, data model, storage strategy
 ├── DEPLOYMENT.md            # Build, deploy, keeper setup
 ├── TESTING.md               # How to run and write tests

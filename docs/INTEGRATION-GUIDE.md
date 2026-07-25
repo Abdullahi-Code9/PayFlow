@@ -211,3 +211,17 @@ async function getChargeHistoryPage(userAddress, offset, limit) {
   return sim.result.retval;
 }
 ```
+
+---
+
+## 9. Event-Driven Integrations
+
+If your app needs to react to on-chain activity (new subscriptions, successful charges, cancellations, merchant freezes) rather than only calling contract methods, do **not** invent a custom polling scheme from scratch.
+
+Use the Event-Driven Integration Cookbook:
+
+- Poll Soroban RPC `getEvents` with a durable cursor
+- Deduplicate on `tx_hash + event_name + ledger` (plus user address when scoped)
+- Choose a reaction pattern: keeper, analytics, notifications, or reconciliation
+
+Full guide: [`docs/EVENT-DRIVEN-GUIDE.md`](./EVENT-DRIVEN-GUIDE.md). Event payload schemas: [`docs/EVENTS.md`](./EVENTS.md). Reference scripts: [`scripts/watch-events.ts`](../scripts/watch-events.ts), [`scripts/replay-events.ts`](../scripts/replay-events.ts).
