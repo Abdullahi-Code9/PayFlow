@@ -810,3 +810,172 @@ input::placeholder {
 .admin-dashboard__section {
   margin-top: var(--space-4);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Address Book Modal
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.address-book-modal {
+  max-width: 540px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.address-book__header {
+  margin-bottom: var(--space-2);
+}
+
+.address-book__title {
+  font-size: var(--text-xl);
+  font-weight: var(--font-bold);
+  color: var(--color-text);
+  margin: 0;
+}
+
+.address-book__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+
+.address-book__close:hover {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.address-book__search-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.address-book__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.address-book__empty {
+  padding: var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+}
+
+.address-book__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.address-book__entry:last-child {
+  border-bottom: none;
+}
+
+.address-book__entry-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.address-book__entry-name {
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.address-book__entry-address {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.address-book__entry-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.address-book__add-form {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: 0;
+}
+
+.address-book__add-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.address-book__add-name {
+  flex: 1;
+  min-width: 120px;
+  margin: 0;
+}
+
+.address-book__add-address {
+  flex: 2;
+  min-width: 180px;
+  margin: 0;
+}
+
+.address-book__add-btn {
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.address-book__add-error {
+  margin-top: var(--space-2);
+  margin-bottom: 0;
+}
+
+.address-book__io {
+  margin-top: 0;
+}
+
+.address-book__import-status {
+  margin-top: calc(-1 * var(--space-2));
+}
+
+/* Small button variant */
+.btn-sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* Icon button (close, etc.) */
+.btn-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+/* Address book trigger button in SubscribeForm */
+.subscribe-form__address-book-btn {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
