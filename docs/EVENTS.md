@@ -2,6 +2,8 @@
 
 This document provides a complete reference for all events emitted by the FlowPay smart contract. Events are grouped by functional area for easy navigation.
 
+> **Building on these events?** This file is the payload/schema reference. For polling Soroban RPC, deduplication, reaction patterns (keeper / analytics / notifications / reconciliation), ordering, and reliability, see the companion cookbook: [`docs/EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md). Reference scripts: [`scripts/watch-events.ts`](../scripts/watch-events.ts), [`scripts/replay-events.ts`](../scripts/replay-events.ts).
+
 ---
 
 ## Table of Contents
@@ -12,6 +14,8 @@ This document provides a complete reference for all events emitted by the FlowPa
 - [Fee Events](#fee-events)
 - [Merchant Events](#merchant-events)
 - [Daily Limit Events](#daily-limit-events)
+- [Grace Period Events](#grace-period-events)
+- [Related Documentation](#related-documentation)
 
 ---
 
@@ -381,3 +385,17 @@ Events related to grace period configuration.
     "data": 86400
   }
   ```
+
+---
+
+## Related Documentation
+
+| Doc | Role |
+| --- | --- |
+| [`docs/EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md) | Cookbook: consume events reliably, react, dedupe, detect gaps |
+| [`docs/KEEPER.md`](KEEPER.md) | Keeper operations (primary producer/consumer of charge cycles) |
+| [`docs/INTEGRATION-GUIDE.md`](INTEGRATION-GUIDE.md) | Third-party app integration (transactions + reads) |
+| [`docs/API.md`](API.md) | Contract function surface |
+| [`scripts/watch-events.ts`](../scripts/watch-events.ts) | Live poller reference implementation |
+| [`scripts/replay-events.ts`](../scripts/replay-events.ts) | Historical range replay with upsert semantics |
+|

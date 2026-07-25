@@ -1,13 +1,14 @@
-# Event-Driven Integration Guide
+# Event-Driven Integration Cookbook
 
-[`docs/EVENTS.md`](EVENTS.md) is a reference: it lists every event the FlowPay contract emits and the shape of its payload. This guide is the companion cookbook — it shows you how to actually *build* something on top of those events: a keeper, an analytics pipeline, a notification service, or a reconciliation job.
+[`docs/EVENTS.md`](EVENTS.md) is a reference: it lists every event the FlowPay contract emits and the shape of its payload. This guide is the companion **cookbook** — it shows you how to actually *build* something on top of those events: a keeper, an analytics pipeline, a notification service, or a reconciliation job.
 
-If you are looking for "what event fires when `X` happens", go to [EVENTS.md](EVENTS.md). If you are looking for "how do I reliably consume these events without missing or double-processing anything", you're in the right place.
+If you are looking for "what event fires when `X` happens", go to [EVENTS.md](EVENTS.md). If you are looking for "how do I reliably consume these events without missing or double-processing anything", you're in the right place. Merchants wiring `subscribed` / `charged` / `cancelled` / `pay_per_use` into a billing dashboard should also read the [Merchant Integration Cookbook](MERCHANT-INTEGRATION.md#4-handling-events).
 
 ---
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [The Soroban Event Model](#the-soroban-event-model)
 - [Event Consumption](#event-consumption)
 - [Deduplication](#deduplication)
@@ -16,6 +17,41 @@ If you are looking for "what event fires when `X` happens", go to [EVENTS.md](EV
 - [Reliability](#reliability)
 - [Event → Consumer Reference Table](#event--consumer-reference-table)
 - [Reference Implementations](#reference-implementations)
+- [Related Documentation](#related-documentation)
+
+---
+
+## Quick Start
+
+Minimal end-to-end loop for a production-shaped consumer:
+
+1. **Bookmark** — persist `lastProcessedLedger` (or the last `pagingToken`) in durable storage.
+2. **Poll** — call Soroban RPC `getEvents` from that bookmark (see [Event Consumption](#event-consumption)).
+3. **Decode** — convert topic/value `ScVal`s with `scValToNative()`; first topic is always the FlowPay event name.
+4. **Dedupe** — upsert on `tx_hash + event_name + ledger` (plus user address when the event is user-scoped); see [Deduplication](#deduplication).
+5. **React** — run one of the [Reaction Patterns](#reaction-patterns), gating side effects on a successful insert.
+6. **Advance** — only then persist the new cursor. Never advance on a failed fetch or partial batch.
+7. **Watch for gaps** — alert when `latestLedger - lastProcessedLedger` exceeds your lag budget ([Reliability](#reliability)).
+
+Start from [`scripts/watch-events.ts`](../scripts/watch-events.ts) for a live poller, or [`scripts/replay-events.ts`](../scripts/replay-events.ts) when backfilling a ledger range.
+
+```ts
+async function tick(server: Server, contractId: string, cursor: CursorStore) {
+  const fromLedger = await cursor.getLastProcessedLedger();
+  const events = await fetchEventsPage(server, contractId, fromLedger); // cursor-paginated
+  events.sort((a, b) => a.ledger - b.ledger || a.txIndex - b.txIndex);
+
+  for (const event of events) {
+    if (await upsertEvent(event)) {
+      await react(event); // keeper | analytics | notify | reconcile
+    }
+  }
+
+  if (events.length > 0) {
+    await cursor.setLastProcessedLedger(events.at(-1)!.ledger);
+  }
+}
+```
 
 ---
 
@@ -95,11 +131,35 @@ do {
 
 **The rule that matters:** always persist the *last processed ledger* (or the last `pagingToken`) as your cursor. On every poll, resume from there — never from a hardcoded `startLedger`, or you will reprocess (and potentially double-react to) the same events forever.
 
+### Filtering by topic
+
+You can narrow `getEvents` to a single event name (or a set of names) by filtering on the first topic. Useful when a consumer only cares about `charged` or `cancelled`:
+
+```ts
+const response = await server.getEvents({
+  startLedger: fromLedger,
+  filters: [
+    {
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      // First topic = event name (Symbol). Exact encoding depends on SDK helpers;
+      // omitting topics returns every FlowPay event for the contract.
+      topics: [["charged"]],
+    },
+  ],
+  limit: 100,
+});
+```
+
+For most integrations, fetch *all* contract events and branch in application code — topic filters are an optimization once volume grows.
+
 ### Recommended polling interval
 
-- **Real-time-ish consumers** (notification services, dashboards): 3–5 seconds. This matches Soroban's ~5 second ledger close time — polling faster just re-fetches the same latest ledger. [`watch-events.ts`](../scripts/watch-events.ts) uses `POLL_INTERVAL_MS = 3000` as its default.
-- **Keepers acting on events** (e.g., triggering a downstream charge in response to `subscribed`): 30–60 seconds is usually sufficient — keeper billing cycles (see [`docs/KEEPER.md`](KEEPER.md)) are not sub-minute operations.
-- **Analytics / reconciliation batch jobs**: minutes to hours, since they are typically reading a completed range rather than tailing the chain tip.
+| Consumer class | Recommended interval | Why |
+|---|---|---|
+| Real-time dashboards / notifications | **3–5 seconds** | Matches Soroban ~5 s ledger close; faster wastes RPC quota. [`watch-events.ts`](../scripts/watch-events.ts) defaults to `POLL_INTERVAL_MS = 3000`. |
+| Keepers reacting to events | **30–60 seconds** | Billing cycles are not sub-minute (see [`docs/KEEPER.md`](KEEPER.md)). |
+| Analytics / reconciliation jobs | **minutes to hours** | Usually process a completed ledger range, not the chain tip. |
 
 Polling faster than the ledger close time wastes RPC quota without getting you fresher data; polling much slower than your reaction SLA means your keeper/notifier lags behind real activity.
 
@@ -120,7 +180,13 @@ None of these mean the chain emitted the event twice — the contract only publi
 
 ### Deduplication key: `tx_hash` + `event_name` + `ledger`
 
-Because a single transaction can emit multiple events of the same type for different users (e.g., `batch_charge()` charging 10 subscribers emits 10 `charged` events in one `txHash`), `tx_hash` alone is not a unique key. The reliable composite key is:
+The acceptance-grade composite key for FlowPay events is:
+
+```
+tx_hash + event_name + ledger
+```
+
+Because a single transaction can emit multiple events of the same type for different users (e.g., `batch_charge()` charging 10 subscribers emits 10 `charged` events in one `txHash`), that triple alone is **not** unique when the event is user-scoped. Production consumers should extend it with the address from topic[1]:
 
 ```
 dedup_key = `${ledger}:${txHash}:${eventName}:${userAddress}`
@@ -332,9 +398,11 @@ Combine this with the [reconciliation pattern](#4-reconciliation-pattern) run on
 | `merchant_added` / `merchant_removed` | Analytics, Notifications | Merchant directory sync |
 | `merchant_frozen` / `merchant_unfrozen` | Notifications, Reconciliation | Urgent operational alert to the affected merchant |
 | `merchant_withdrawal` | Analytics, Reconciliation | Merchant payout ledger |
+| `merch_hist_cleared` | Analytics, Reconciliation | Merchant revenue-history wipe — reset aggregates |
 | `daily_limit_set` / `daily_limit_removed` | Analytics | User risk/spend-limit configuration tracking |
 | `contract_paused` / `contract_unpaused` | Notifications, Reconciliation | Protocol-wide incident signal — page operators |
 | `admin_transferred` / `upgraded` | Reconciliation | Security-sensitive audit trail |
+| `min_interval` | Analytics, Reconciliation | Protocol policy change — billing eligibility floor |
 | `fee_proposed` / `fee_committed` | Analytics, Reconciliation | Fee-schedule audit trail |
 | `grace_period_proposed` / `grace_period_committed` | Analytics | Billing-policy audit trail |
 
@@ -346,13 +414,25 @@ See [`docs/EVENTS.md`](EVENTS.md) for the full payload schema of each event.
 
 | Script | Demonstrates |
 |---|---|
-| [`scripts/watch-events.ts`](../scripts/watch-events.ts) | Live polling loop, in-memory dedup, color-coded real-time output |
+| [`scripts/watch-events.ts`](../scripts/watch-events.ts) | Live polling loop, in-memory dedup (`ledger:txHash:eventType:user`), color-coded real-time output, 3 s poll interval |
 | [`scripts/replay-events.ts`](../scripts/replay-events.ts) | Cursor-based pagination over a historical ledger range, batch processing, upsert integration point |
 
 Both scripts are intentionally minimal reference implementations — the patterns above show how to extend them into keeper, analytics, notification, or reconciliation services.
 
+```bash
+# Live tail (requires a deployed contract id)
+CONTRACT_ID=C... RPC_URL=https://soroban-testnet.stellar.org npx tsx scripts/watch-events.ts
+
+# Backfill a ledger window into your indexer upsert path
+CONTRACT_ID=C... npx tsx scripts/replay-events.ts --from-ledger 50000 --to-ledger 51000
+```
+
+---
+
 ## Related Documentation
 
 - [`docs/EVENTS.md`](EVENTS.md) — full event payload reference
-- [`docs/KEEPER.md`](KEEPER.md) — keeper bot operations (batch charging, not event-driven itself, but the primary consumer of `charged`/related state)
+- [`docs/KEEPER.md`](KEEPER.md) — keeper bot operations (batch charging; complements event-driven charge tracking)
+- [`docs/INTEGRATION-GUIDE.md`](INTEGRATION-GUIDE.md) — transaction/read integration for third-party apps
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — overall system architecture
+- [`docs/TESTING.md`](TESTING.md) — including live-mode event-count validation against keepers

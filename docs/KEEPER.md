@@ -392,5 +392,6 @@ Renew the lease before it expires. If a leader crashes, the lock expires and a f
 
 - `batch_charge(users)` — contract function reference: [`docs/API.md`](API.md)
 - Full operations runbook (pagination deep-dive, Terraform IaC): [`docs/operations/keeper_runbook.md`](operations/keeper_runbook.md)
+- Event-driven charge tracking / gap detection: [`docs/EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md)
 - Architecture and storage layout: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
 - Error codes: [`docs/ERROR-CODES.md`](ERROR-CODES.md)
