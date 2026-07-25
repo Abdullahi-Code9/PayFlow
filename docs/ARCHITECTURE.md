@@ -165,6 +165,8 @@ Events are emitted from `events.rs` and kept separate from storage mutation so t
 
 Events are the main off-chain integration surface for analytics, indexers, and the keeper workflow.
 
+Merchants and auditors who need to turn those events into a finance-oriented audit trail (exports, reconciliation, retention) should follow [COMPLIANCE.md](./COMPLIANCE.md).
+
 ---
 
 ## Frontend Interaction
