@@ -154,7 +154,7 @@ Source: `contract/src/lib.rs`, `ProtocolStats` struct.
 ## R
 
 ### Referrer
-An optional address recorded at subscription creation time. The contract stores the referrer for later retrieval and emits a `referred` event. This can be used to support referral analytics.
+An optional address recorded at subscription creation time. The contract stores the referrer for later retrieval and emits a `referred` event. This can be used to support referral analytics. PayFlow does not automatically pay referrers on-chain; see [REFERRALS.md](./REFERRALS.md) for architecture and off-chain payout patterns.
 
 Source: `contract/src/referral.rs`, `get_referrer()`, `DataKey::Referral(user)`.
 

@@ -154,7 +154,15 @@ async function listenForCharges() {
 
 ---
 
-## 7. Error Handling
+## 7. Referral Attribution
+
+Pass an optional `referrer` Stellar address as the last argument to `subscribe` (instead of `xdr.ScVal.scvVoid()`) to record on-chain attribution. Referral **codes and links** are resolved off-chain to that address before the call. FlowPay does not pay referrers automatically — use `referred` / `charged` events plus `get_referrer` for commissions.
+
+Full architecture, payout models, link workflows, CLI examples, and TypeScript snippets: **[REFERRALS.md](./REFERRALS.md)**.
+
+---
+
+## 8. Error Handling
 
 When calling the contract, the RPC may return specific execution errors if validations fail. You must handle these gracefully in your application.
 
@@ -183,7 +191,7 @@ try {
 
 ---
 
-## 8. Paginating Charge History
+## 9. Paginating Charge History
 
 `get_charge_history_page(user, offset, limit)` reads from `ChargeHistory(user)`, a `Vec<u64>` capped at the 12 most recent charge timestamps (oldest → newest, FIFO). `limit` is silently capped at 12, and an `offset` past the end of the history returns an empty array rather than an error — there is no `ascending` flag, so "most recent first" has to be computed client-side from the returned oldest-to-newest slice.
 
