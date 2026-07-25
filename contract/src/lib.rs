@@ -1588,6 +1588,39 @@ impl FlowPay {
         let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
         Some(sub.merchant)
     }
+
+    /// Returns a page of subscriber addresses starting at `offset`, capped
+    /// at 50 per call, filtered to only those whose subscription is
+    /// currently active. Avoids forcing callers to over-fetch via
+    /// `get_subscriber_page` and filter client-side.
+    pub fn get_active_subscriber_page(env: Env, offset: u64, limit: u32) -> Vec<Address> {
+        let count = subscription_count::get_subscriber_index_size(&env);
+        let cap: u32 = if limit > 50 { 50 } else { limit };
+        let mut result = Vec::new(&env);
+        if offset >= count || cap == 0 {
+            return result;
+        }
+        let mut i = offset;
+        while i < count && result.len() < cap {
+            if let Some(addr) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Address>(&DataKey::SubscriberIndex(i))
+            {
+                if let Some(sub) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, Subscription>(&DataKey::Subscription(addr.clone()))
+                {
+                    if sub.active {
+                        result.push_back(addr);
+                    }
+                }
+            }
+            i += 1;
+        }
+        result
+    }
 }
 
 /// Refreshes the contract instance's TTL. Instance storage holds shared
