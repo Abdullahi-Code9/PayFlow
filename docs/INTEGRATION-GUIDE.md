@@ -11,6 +11,7 @@ This guide is designed for third-party applications (such as SaaS billing dashbo
 Before writing any integration code, ensure your environment is set up.
 
 ### Dependencies
+
 You will need the official Stellar JavaScript/TypeScript SDK:
 
 ```bash
@@ -18,7 +19,9 @@ npm install @stellar/stellar-sdk
 ```
 
 ### Authentication
+
 Depending on your integration, you will authenticate transactions via:
+
 1. **Client-side (Wallets):** Freighter, Albedo, or xBull.
 2. **Server-side (Keepers/Backend):** Raw Stellar keypairs (using `Keypair.fromSecret()`).
 
@@ -26,14 +29,16 @@ Depending on your integration, you will authenticate transactions via:
 
 ## 2. Testnet Sandbox Setup
 
-While developing, you should point your application to the Stellar Testnet. 
+While developing, you should point your application to the Stellar Testnet.
 
 **Testnet Configuration:**
+
 - **RPC URL:** `https://soroban-testnet.stellar.org`
 - **Network Passphrase:** `Test SDF Network ; September 2015`
 
 **Funding Test Accounts:**
 You can instantly fund testing accounts using Friendbot:
+
 ```javascript
 const response = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
 ```
@@ -45,13 +50,13 @@ const response = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
 To interact with the PayFlow smart contract, instantiate it using the Stellar SDK.
 
 ```javascript
-import { rpc, Contract, xdr, Keypair, Networks } from '@stellar/stellar-sdk';
+import { rpc, Contract, xdr, Keypair, Networks } from "@stellar/stellar-sdk";
 
 // Initialize the RPC server
-const server = new rpc.Server('https://soroban-testnet.stellar.org');
+const server = new rpc.Server("https://soroban-testnet.stellar.org");
 
 // The deployed PayFlow contract ID
-const CONTRACT_ID = 'C...'; 
+const CONTRACT_ID = "C...";
 const payFlowContract = new Contract(CONTRACT_ID);
 ```
 
@@ -59,40 +64,54 @@ const payFlowContract = new Contract(CONTRACT_ID);
 
 ## 4. Subscribing a User Programmatically
 
-Subscribing requires two steps: 
+Subscribing requires two steps:
+
 1. **Token Allowance:** The user must approve the PayFlow contract to pull funds.
 2. **Subscribe:** The user calls the `subscribe` function on PayFlow.
 
 ```javascript
-async function subscribeUser(userKeypair, merchantAddress, amountStroops, intervalSeconds, tokenAddress) {
+async function subscribeUser(
+  userKeypair,
+  merchantAddress,
+  amountStroops,
+  intervalSeconds,
+  tokenAddress,
+) {
   const source = await server.getAccount(userKeypair.publicKey());
-  
+
   // 1. Build the Subscribe transaction
-  const tx = new TransactionBuilder(source, { fee: '1000', networkPassphrase: Networks.TESTNET })
+  const tx = new TransactionBuilder(source, {
+    fee: "1000",
+    networkPassphrase: Networks.TESTNET,
+  })
     .addOperation(
-      payFlowContract.call('subscribe',
-        xdr.ScVal.scvAddress(userKeypair.publicKey()),   // user
-        xdr.ScVal.scvAddress(merchantAddress),           // merchant
-        xdr.ScVal.scvI128(new xdr.Int128Parts({          // amount
+      payFlowContract.call(
+        "subscribe",
+        xdr.ScVal.scvAddress(userKeypair.publicKey()), // user
+        xdr.ScVal.scvAddress(merchantAddress), // merchant
+        xdr.ScVal.scvI128(
+          new xdr.Int128Parts({
+            // amount
             hi: xdr.Int64.fromString("0"),
-            lo: xdr.Uint64.fromString(amountStroops.toString())
-        })), 
+            lo: xdr.Uint64.fromString(amountStroops.toString()),
+          }),
+        ),
         xdr.ScVal.scvU64(xdr.Uint64.fromString(intervalSeconds.toString())), // interval
-        xdr.ScVal.scvAddress(tokenAddress),              // token
-        xdr.ScVal.scvVoid(),                             // trial_period (Option<u64> -> None)
-        xdr.ScVal.scvVoid()                              // referrer (Option<Address> -> None)
-      )
+        xdr.ScVal.scvAddress(tokenAddress), // token
+        xdr.ScVal.scvVoid(), // trial_period (Option<u64> -> None)
+        xdr.ScVal.scvVoid(), // referrer (Option<Address> -> None)
+      ),
     )
     .setTimeout(30)
     .build();
 
   // 2. Sign and submit
   tx.sign(userKeypair);
-  
+
   // Note: Use server.prepareTransaction() in production for correct fee estimation
   const preparedTx = await server.prepareTransaction(tx);
   preparedTx.sign(userKeypair);
-  
+
   const response = await server.sendTransaction(preparedTx);
   return response;
 }
@@ -107,19 +126,22 @@ async function subscribeUser(userKeypair, merchantAddress, amountStroops, interv
 ```javascript
 async function processBatchCharges(keeperKeypair, userAddresses) {
   const source = await server.getAccount(keeperKeypair.publicKey());
-  
+
   // Build SCVal array of addresses
-  const scvUsers = userAddresses.map(addr => xdr.ScVal.scvAddress(addr));
+  const scvUsers = userAddresses.map((addr) => xdr.ScVal.scvAddress(addr));
   const scvVecUsers = xdr.ScVal.scvVec(scvUsers);
 
-  const tx = new TransactionBuilder(source, { fee: '1000', networkPassphrase: Networks.TESTNET })
-    .addOperation(payFlowContract.call('batch_charge', scvVecUsers))
+  const tx = new TransactionBuilder(source, {
+    fee: "1000",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(payFlowContract.call("batch_charge", scvVecUsers))
     .setTimeout(30)
     .build();
 
   const preparedTx = await server.prepareTransaction(tx);
   preparedTx.sign(keeperKeypair);
-  
+
   return await server.sendTransaction(preparedTx);
 }
 ```
@@ -133,19 +155,17 @@ PayFlow emits structured events that you can poll using the Soroban RPC `getEven
 ```javascript
 async function listenForCharges() {
   const response = await server.getEvents({
-    startLedger: 1000000, 
+    startLedger: 1000000,
     filters: [
       {
         type: "contract",
         contractIds: [CONTRACT_ID],
-        topics: [
-          [xdr.ScVal.scvSymbol("charged").toXDR("base64")]
-        ]
-      }
-    ]
+        topics: [[xdr.ScVal.scvSymbol("charged").toXDR("base64")]],
+      },
+    ],
   });
 
-  response.events.forEach(event => {
+  response.events.forEach((event) => {
     console.log(`Charge processed at ledger: ${event.ledger}`);
     // Decode event.value here to get amount, merchant, and timestamp
   });
@@ -176,16 +196,20 @@ Common errors you should catch:
 - **Token Allowance Failed:** If the token contract throws an error during a charge, the user likely revoked their allowance or has an insufficient balance.
 
 **Handling Errors:**
+
 ```javascript
 try {
-    const preparedTx = await server.prepareTransaction(tx);
-    // ...
+  const preparedTx = await server.prepareTransaction(tx);
+  // ...
 } catch (error) {
-    if (error.response?.data?.extras?.result_codes?.operations) {
-        console.error("Contract Execution Failed:", error.response.data.extras.result_codes.operations);
-    } else {
-        console.error("RPC Error:", error);
-    }
+  if (error.response?.data?.extras?.result_codes?.operations) {
+    console.error(
+      "Contract Execution Failed:",
+      error.response.data.extras.result_codes.operations,
+    );
+  } else {
+    console.error("RPC Error:", error);
+  }
 }
 ```
 
@@ -201,19 +225,23 @@ The full mechanics — ring buffer diagram, worked examples, and an offset/limit
 async function getChargeHistoryPage(userAddress, offset, limit) {
   const source = await server.getAccount(userAddress);
 
-  const tx = new TransactionBuilder(source, { fee: '1000', networkPassphrase: Networks.TESTNET })
+  const tx = new TransactionBuilder(source, {
+    fee: "1000",
+    networkPassphrase: Networks.TESTNET,
+  })
     .addOperation(
-      payFlowContract.call('get_charge_history_page',
+      payFlowContract.call(
+        "get_charge_history_page",
         xdr.ScVal.scvAddress(userAddress),
         xdr.ScVal.scvU32(offset),
-        xdr.ScVal.scvU32(limit)
-      )
+        xdr.ScVal.scvU32(limit),
+      ),
     )
     .setTimeout(30)
     .build();
 
   const sim = await server.simulateTransaction(tx);
-  if ('error' in sim) throw new Error(sim.error);
+  if ("error" in sim) throw new Error(sim.error);
 
   // sim.result.retval decodes to a Vec<u64> of charge timestamps (oldest → newest).
   return sim.result.retval;

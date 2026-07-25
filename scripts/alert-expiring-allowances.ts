@@ -38,7 +38,8 @@ import {
 
 const RPC_URL = process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID ?? "";
-const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET) as string;
+const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ??
+  Networks.TESTNET) as string;
 const ALERT_WINDOW_LEDGERS = parseInt(
   process.env.ALERT_WINDOW_LEDGERS ?? "17280",
   10,
@@ -163,7 +164,8 @@ async function getSubscription(user: string): Promise<Subscription | null> {
     const result = await server.simulateTransaction(tx);
     if ("error" in result) return null;
 
-    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result
+      ?.retval;
     if (!retval || retval.switch().name === "scvVoid") return null;
 
     const fields: Record<string, unknown> = {};
@@ -213,7 +215,10 @@ async function getSubscription(user: string): Promise<Subscription | null> {
  * Returns the current allowance amount that the FlowPay contract is approved
  * to spend on behalf of `owner` for token `tokenId`.
  */
-async function getAllowanceAmount(owner: string, tokenId: string): Promise<bigint> {
+async function getAllowanceAmount(
+  owner: string,
+  tokenId: string,
+): Promise<bigint> {
   try {
     const tokenContract = new Contract(tokenId);
     const tx = new TransactionBuilder(new Account(SIM_SOURCE, "0"), {
@@ -233,7 +238,8 @@ async function getAllowanceAmount(owner: string, tokenId: string): Promise<bigin
     const result = await server.simulateTransaction(tx);
     if ("error" in result) return 0n;
 
-    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result
+      ?.retval;
     if (!retval || retval.switch().name === "scvVoid") return 0n;
 
     return BigInt(retval.i128().toString());
@@ -294,7 +300,8 @@ async function getAllowanceExpiryLedger(
     const entry = response.entries[0];
     // liveUntilLedgerSeq is the last ledger the entry is live on.
     // The field is named liveUntilLedgerSeq in the SDK response object.
-    const liveUntil = (entry as { liveUntilLedgerSeq?: number }).liveUntilLedgerSeq;
+    const liveUntil = (entry as { liveUntilLedgerSeq?: number })
+      .liveUntilLedgerSeq;
     return typeof liveUntil === "number" ? liveUntil : 0;
   } catch {
     return 0;
@@ -370,7 +377,9 @@ async function sendWebhook(url: string, report: AlertReport): Promise<boolean> {
       body: JSON.stringify(report),
     });
     if (response.ok) {
-      console.error(`Webhook delivered successfully (HTTP ${response.status}).`);
+      console.error(
+        `Webhook delivered successfully (HTTP ${response.status}).`,
+      );
       return true;
     } else {
       console.error(
@@ -487,6 +496,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(`Fatal error: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(
+    `Fatal error: ${err instanceof Error ? err.message : String(err)}`,
+  );
   process.exit(1);
 });

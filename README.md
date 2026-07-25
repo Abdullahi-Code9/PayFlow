@@ -53,15 +53,16 @@ pub fn get_daily_limit(env: Env, user: Address) -> Option<i128> {
 get_daily_limit(env: Env, user: Address) -> Option<i128>
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `user` | `Address` | The subscriber address to query |
+| Parameter | Type      | Description                     |
+| --------- | --------- | ------------------------------- |
+| `user`    | `Address` | The subscriber address to query |
 
 **Returns:** `Some(limit)` in stroops if a limit is set, `None` otherwise.  
 **Auth:** None required.  
 **Storage:** Reads `DataKey::DailyLimit(user)` from temporary storage.
 
 **CLI example:**
+
 ```bash
 soroban contract invoke \
   --id <CONTRACT_ID> \
@@ -139,6 +140,7 @@ cargo test daily_limit
 ```
 
 Expected output:
+
 ```
 test test::test_daily_limit_allows_spend_within_limit ... ok
 test test::test_daily_limit_accumulates_across_calls ... ok
@@ -202,11 +204,11 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Rust | 1.70+ | `curl https://sh.rustup.rs -sSf \| sh` |
-| wasm32 target | — | `rustup target add wasm32-unknown-unknown` |
-| Soroban CLI | 21.x | `cargo install --locked soroban-cli` |
+| Tool          | Version | Install                                    |
+| ------------- | ------- | ------------------------------------------ |
+| Rust          | 1.70+   | `curl https://sh.rustup.rs -sSf \| sh`     |
+| wasm32 target | —       | `rustup target add wasm32-unknown-unknown` |
+| Soroban CLI   | 21.x    | `cargo install --locked soroban-cli`       |
 
 ---
 

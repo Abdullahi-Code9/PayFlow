@@ -51,6 +51,7 @@ contract/src/
 ```
 
 **Rules:**
+
 - Business logic belongs in a focused module, not in `lib.rs`.
 - `lib.rs` only wires public contract functions to module helpers — no logic inline.
 - `bench.rs` and `test.rs` are gated with `#[cfg(test)]`.
@@ -181,13 +182,13 @@ test_daily_limit_removed_event_emitted
 
 Every new public function needs at minimum:
 
-| Test | What it verifies |
-|------|-----------------|
-| Happy path | Function succeeds under normal conditions |
-| Precondition failure | Correct error when inputs are invalid |
-| Auth enforcement | Panics when called without the required auth |
-| State after | Storage reflects the expected change |
-| Event emitted | The correct event was published (for state-changing functions) |
+| Test                 | What it verifies                                               |
+| -------------------- | -------------------------------------------------------------- |
+| Happy path           | Function succeeds under normal conditions                      |
+| Precondition failure | Correct error when inputs are invalid                          |
+| Auth enforcement     | Panics when called without the required auth                   |
+| State after          | Storage reflects the expected change                           |
+| Event emitted        | The correct event was published (for state-changing functions) |
 
 ### Asserting events
 
@@ -230,12 +231,12 @@ Benchmark tests live in `contract/src/bench.rs` and measure CPU instruction coun
 
 ### Baselines
 
-| Function | CPU instructions | Memory bytes |
-|----------|-----------------|--------------|
-| `subscribe()` | ~4 200 000 | ~200 000 |
-| `charge()` | ~3 800 000 | ~180 000 |
-| `pay_per_use()` | ~3 600 000 | ~170 000 |
-| `batch_charge()` — 10 users | ~28 000 000 | ~1 200 000 |
+| Function                    | CPU instructions | Memory bytes |
+| --------------------------- | ---------------- | ------------ |
+| `subscribe()`               | ~4 200 000       | ~200 000     |
+| `charge()`                  | ~3 800 000       | ~180 000     |
+| `pay_per_use()`             | ~3 600 000       | ~170 000     |
+| `batch_charge()` — 10 users | ~28 000 000      | ~1 200 000   |
 
 Thresholds in `bench.rs` include ~10% headroom. If your change shifts a baseline by more than 5%, update the table and the constant.
 
@@ -314,6 +315,7 @@ The full error reference is in [`docs/ERROR-CODES.md`](../docs/ERROR-CODES.md).
 Before opening a pull request against `main`:
 
 **Contract**
+
 - [ ] `cargo test` passes with no failures
 - [ ] `cargo clippy -- -D warnings` passes with no warnings
 - [ ] `cargo check` passes
@@ -326,16 +328,19 @@ Before opening a pull request against `main`:
 - [ ] `#![no_std]` is preserved — no `std::` imports anywhere
 
 **Benchmarks**
+
 - [ ] If your change touches `subscribe`, `charge`, `pay_per_use`, or `batch_charge`, run `cargo test bench -- --nocapture` and confirm instruction counts are within the documented baselines
 - [ ] Update `bench.rs` constants and the baselines table if a deliberate change shifts a baseline
 
 **Documentation**
+
 - [ ] New public functions are added to [`docs/API.md`](API.md)
 - [ ] New events are added to [`docs/EVENTS.md`](EVENTS.md)
 - [ ] New error codes are added to [`docs/ERROR-CODES.md`](ERROR-CODES.md)
 - [ ] PR description explains what changed, why, and links to the relevant issue
 
 **CI**
+
 - [ ] The `Backend (Rust)` GitHub Actions workflow passes (`cargo build` + `cargo test`)
 
 ---
