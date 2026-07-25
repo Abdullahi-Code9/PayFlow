@@ -32,31 +32,31 @@ graph TD
 
 ## Contract Modules
 
-| Module | Responsibility |
-| --- | --- |
-| `lib.rs` | Public entry points, contract data types, storage keys, and cross-module orchestration. |
-| `admin.rs` | Admin initialization, auth checks, and two-step admin transfer. |
-| `batch.rs` | `batch_charge()` processing and per-user result reporting. |
-| `bench.rs` | Benchmark-only instruction counting for core flows. |
-| `charge_exec.rs` | Charge scheduling helpers and charge execution internals. |
-| `errors.rs` | Contract error codes. |
-| `events.rs` | All event emission helpers. |
-| `fee.rs` | Protocol fee proposal, commit, and fee calculation logic. |
-| `grace.rs` | Grace-period proposal, commit, and lookup helpers. |
-| `merchant_stats.rs` | Merchant revenue, subscriber counts, and daily revenue buckets. |
-| `migration.rs` | Schema version tracking and storage migration. |
-| `min_interval.rs` | Minimum billing interval floor. |
-| `referral.rs` | Referral storage and lookup. See [REFERRALS.md](./REFERRALS.md). |
-| `spending_limit.rs` | Temporary daily spending limits for `pay_per_use()`. |
-| `storage.rs` | Shared storage read/write helpers. |
-| `subscription_count.rs` | Active subscription count and append-only subscriber index. |
-| `subscription_history.rs` | Charge history recording and paging. |
-| `subscription_metadata.rs` | Short subscription labels. |
-| `test.rs` | Contract unit tests. |
-| `trial.rs` | Trial end computation and trial helpers. |
-| `upgrade.rs` | WASM upgrade wrapper and upgrade event emission. |
-| `validation.rs` | Shared validation helpers for amounts, intervals, and allowance checks. |
-| `whitelist.rs` | Merchant whitelist and freeze state helpers. |
+| Module                     | Responsibility                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| `lib.rs`                   | Public entry points, contract data types, storage keys, and cross-module orchestration. |
+| `admin.rs`                 | Admin initialization, auth checks, and two-step admin transfer.                         |
+| `batch.rs`                 | `batch_charge()` processing and per-user result reporting.                              |
+| `bench.rs`                 | Benchmark-only instruction counting for core flows.                                     |
+| `charge_exec.rs`           | Charge scheduling helpers and charge execution internals.                               |
+| `errors.rs`                | Contract error codes.                                                                   |
+| `events.rs`                | All event emission helpers.                                                             |
+| `fee.rs`                   | Protocol fee proposal, commit, and fee calculation logic.                               |
+| `grace.rs`                 | Grace-period proposal, commit, and lookup helpers.                                      |
+| `merchant_stats.rs`        | Merchant revenue, subscriber counts, and daily revenue buckets.                         |
+| `migration.rs`             | Schema version tracking and storage migration.                                          |
+| `min_interval.rs`          | Minimum billing interval floor.                                                         |
+| `referral.rs`              | Referral storage and lookup. See [REFERRALS.md](./REFERRALS.md).                        |
+| `spending_limit.rs`        | Temporary daily spending limits for `pay_per_use()`.                                    |
+| `storage.rs`               | Shared storage read/write helpers.                                                      |
+| `subscription_count.rs`    | Active subscription count and append-only subscriber index.                             |
+| `subscription_history.rs`  | Charge history recording and paging.                                                    |
+| `subscription_metadata.rs` | Short subscription labels.                                                              |
+| `test.rs`                  | Contract unit tests.                                                                    |
+| `trial.rs`                 | Trial end computation and trial helpers.                                                |
+| `upgrade.rs`               | WASM upgrade wrapper and upgrade event emission.                                        |
+| `validation.rs`            | Shared validation helpers for amounts, intervals, and allowance checks.                 |
+| `whitelist.rs`             | Merchant whitelist and freeze state helpers.                                            |
 
 ---
 
@@ -104,35 +104,35 @@ graph TD
 
 FlowPay uses Soroban instance, persistent, and temporary storage deliberately.
 
-| DataKey | Purpose | Storage type |
-| --- | --- | --- |
-| `Token` | Default payment token | instance |
-| `Admin` | Current admin | instance |
-| `PendingAdmin` | Two-step admin transfer target | instance |
-| `ContractPaused` | Global pause flag | instance |
-| `GracePeriod` | Charge grace window | instance |
-| `WhitelistEnabled` | Merchant whitelist flag | instance |
-| `FeeCollector` / `FeeBps` | Protocol fee configuration | instance |
-| `PendingFee` | Pending fee proposal | temporary |
-| `PendingGracePeriod` | Pending grace-period proposal | temporary |
-| `MinInterval` | Minimum allowed subscription interval | instance |
-| `SchemaVersion` | Storage schema version | instance |
-| `ActiveCount` | Active subscription count | instance |
-| `SubscriberIndexSize` | Append-only subscriber count | instance |
-| `Subscription(user)` | Subscriber subscription record | persistent |
-| `MerchantWhitelist(merchant)` | Whitelisted merchant flag | persistent |
-| `MerchantFrozen(merchant)` | Frozen merchant flag | persistent |
-| `MerchantRevenue(merchant)` | Cumulative merchant revenue | persistent |
-| `MerchantRevenueDay(merchant, day)` | Daily revenue bucket | persistent |
-| `MerchantRevenueHistory(merchant)` | History vector for revenue reads | persistent |
-| `MerchantSubCount(merchant)` | Active subscriber count per merchant | persistent |
-| `DailyLimit(user)` | Temporary pay-per-use limit | temporary |
-| `DailySpent(user)` | Temporary pay-per-use spend counter | temporary |
-| `Referral(user)` | Referrer for a subscriber ([REFERRALS.md](./REFERRALS.md)) | persistent |
-| `SubscriptionMeta(user)` | Short subscription label | persistent |
-| `ChargeHistory(user)` | Charge timestamps | persistent |
-| `SubscriberIndex(i)` | Append-only subscriber list entry | persistent |
-| `GlobalVolumeWindow` | Rolling volume cap state | instance |
+| DataKey                             | Purpose                                                    | Storage type |
+| ----------------------------------- | ---------------------------------------------------------- | ------------ |
+| `Token`                             | Default payment token                                      | instance     |
+| `Admin`                             | Current admin                                              | instance     |
+| `PendingAdmin`                      | Two-step admin transfer target                             | instance     |
+| `ContractPaused`                    | Global pause flag                                          | instance     |
+| `GracePeriod`                       | Charge grace window                                        | instance     |
+| `WhitelistEnabled`                  | Merchant whitelist flag                                    | instance     |
+| `FeeCollector` / `FeeBps`           | Protocol fee configuration                                 | instance     |
+| `PendingFee`                        | Pending fee proposal                                       | temporary    |
+| `PendingGracePeriod`                | Pending grace-period proposal                              | temporary    |
+| `MinInterval`                       | Minimum allowed subscription interval                      | instance     |
+| `SchemaVersion`                     | Storage schema version                                     | instance     |
+| `ActiveCount`                       | Active subscription count                                  | instance     |
+| `SubscriberIndexSize`               | Append-only subscriber count                               | instance     |
+| `Subscription(user)`                | Subscriber subscription record                             | persistent   |
+| `MerchantWhitelist(merchant)`       | Whitelisted merchant flag                                  | persistent   |
+| `MerchantFrozen(merchant)`          | Frozen merchant flag                                       | persistent   |
+| `MerchantRevenue(merchant)`         | Cumulative merchant revenue                                | persistent   |
+| `MerchantRevenueDay(merchant, day)` | Daily revenue bucket                                       | persistent   |
+| `MerchantRevenueHistory(merchant)`  | History vector for revenue reads                           | persistent   |
+| `MerchantSubCount(merchant)`        | Active subscriber count per merchant                       | persistent   |
+| `DailyLimit(user)`                  | Temporary pay-per-use limit                                | temporary    |
+| `DailySpent(user)`                  | Temporary pay-per-use spend counter                        | temporary    |
+| `Referral(user)`                    | Referrer for a subscriber ([REFERRALS.md](./REFERRALS.md)) | persistent   |
+| `SubscriptionMeta(user)`            | Short subscription label                                   | persistent   |
+| `ChargeHistory(user)`               | Charge timestamps                                          | persistent   |
+| `SubscriberIndex(i)`                | Append-only subscriber list entry                          | persistent   |
+| `GlobalVolumeWindow`                | Rolling volume cap state                                   | instance     |
 
 Persistent entries that must remain available are refreshed with TTL extensions where needed, most importantly subscription records and selected merchant-revenue data. Temporary entries are used for short-lived proposals and daily spending caps.
 
@@ -145,24 +145,24 @@ Each `Subscription(user)` record carries its own `token` address rather than sha
 
 Events are emitted from `events.rs` and kept separate from storage mutation so the public contract methods remain small.
 
-| Event | Trigger |
-| --- | --- |
-| `subscribed` | New or replaced subscription created |
-| `referred` | Referrer stored on subscribe ([REFERRALS.md](./REFERRALS.md)) |
-| `charged` | Successful recurring charge |
-| `pay_per_use` | Successful one-time charge |
-| `cancelled` | Subscription cancelled |
-| `paused` / `resumed` | Subscription pause state changed |
-| `admin_transferred` | Two-step admin transfer completed |
-| `fee_proposed` / `fee_committed` | Fee configuration changed |
-| `merchant_added` / `merchant_removed` | Whitelist updated |
-| `merchant_frozen` / `merchant_unfrozen` | Merchant freeze state changed |
-| `grace_period_proposed` / `grace_period_committed` | Grace period updated |
-| `subscription_amount_updated` / `subscription_interval_updated` | Admin adjusted a subscription |
-| `merchant_withdrawal` | Merchant withdrew revenue |
-| `daily_limit_set` / `daily_limit_removed` | Daily limit updated |
-| `subscription_transferred` | Subscription ownership moved |
-| `upgraded` | Contract WASM upgraded |
+| Event                                                           | Trigger                                                       |
+| --------------------------------------------------------------- | ------------------------------------------------------------- |
+| `subscribed`                                                    | New or replaced subscription created                          |
+| `referred`                                                      | Referrer stored on subscribe ([REFERRALS.md](./REFERRALS.md)) |
+| `charged`                                                       | Successful recurring charge                                   |
+| `pay_per_use`                                                   | Successful one-time charge                                    |
+| `cancelled`                                                     | Subscription cancelled                                        |
+| `paused` / `resumed`                                            | Subscription pause state changed                              |
+| `admin_transferred`                                             | Two-step admin transfer completed                             |
+| `fee_proposed` / `fee_committed`                                | Fee configuration changed                                     |
+| `merchant_added` / `merchant_removed`                           | Whitelist updated                                             |
+| `merchant_frozen` / `merchant_unfrozen`                         | Merchant freeze state changed                                 |
+| `grace_period_proposed` / `grace_period_committed`              | Grace period updated                                          |
+| `subscription_amount_updated` / `subscription_interval_updated` | Admin adjusted a subscription                                 |
+| `merchant_withdrawal`                                           | Merchant withdrew revenue                                     |
+| `daily_limit_set` / `daily_limit_removed`                       | Daily limit updated                                           |
+| `subscription_transferred`                                      | Subscription ownership moved                                  |
+| `upgraded`                                                      | Contract WASM upgraded                                        |
 
 Events are the main off-chain integration surface for analytics, indexers, and the keeper workflow.
 

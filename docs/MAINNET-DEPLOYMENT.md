@@ -10,16 +10,16 @@ For day-to-day Testnet steps, see [`DEPLOYMENT.md`](DEPLOYMENT.md). For audit ga
 
 > Real funds must not flow through an unaudited Mainnet deployment.
 
-- [ ] **Independent security audit complete** — findings remediations merged; report (or summary) published or accepted by maintainers. *Why:* Mainnet holds user allowances and merchant revenue.
-- [ ] **Audit WASM hash matches release artifact** — SHA256 of `flow_pay.wasm` recorded in release notes. *Why:* prevents deploying an unaudited binary.
+- [ ] **Independent security audit complete** — findings remediations merged; report (or summary) published or accepted by maintainers. _Why:_ Mainnet holds user allowances and merchant revenue.
+- [ ] **Audit WASM hash matches release artifact** — SHA256 of `flow_pay.wasm` recorded in release notes. _Why:_ prevents deploying an unaudited binary.
 - [ ] **Key management plan approved**
   - [ ] Admin key on a **hardware wallet** (or equivalent HSM)
   - [ ] Prefer **multisig / multi-party** admin (Stellar multisig thresholds) over a single hot key
   - [ ] Deployer key separate from long-term admin key where possible
   - [ ] Keeper keys are hot keys with **limited XLM** and no admin rights  
-  *Why:* admin compromise can pause, freeze merchants, or change fees.
-- [ ] **Emergency runbook rehearsed** — who can call `pause_contract()`, who to page, how to unpause. *Why:* reduces incident MTTR.
-- [ ] **Fee governance configured** — intended `bps` and fee collector (not the contract address). Two-step propose/commit understood. *Why:* fee mistakes are costly on Mainnet.
+        _Why:_ admin compromise can pause, freeze merchants, or change fees.
+- [ ] **Emergency runbook rehearsed** — who can call `pause_contract()`, who to page, how to unpause. _Why:_ reduces incident MTTR.
+- [ ] **Fee governance configured** — intended `bps` and fee collector (not the contract address). Two-step propose/commit understood. _Why:_ fee mistakes are costly on Mainnet.
 
 ---
 
@@ -99,10 +99,10 @@ soroban contract invoke \
 # Expected: success; subsequent initialize must fail with AlreadyInitialized (1)
 ```
 
-- [ ] WASM upload succeeded; hash matches Phase 1 record  
-- [ ] Contract ID recorded in password manager / ops vault  
-- [ ] `initialize` succeeded exactly once  
-- [ ] Admin address is the intended hardware/multisig account  
+- [ ] WASM upload succeeded; hash matches Phase 1 record
+- [ ] Contract ID recorded in password manager / ops vault
+- [ ] `initialize` succeeded exactly once
+- [ ] Admin address is the intended hardware/multisig account
 
 ### Optional: migrate
 
@@ -114,7 +114,7 @@ soroban contract invoke \
   -- migrate
 ```
 
-- [ ] `migrate` run if this WASM introduces schema changes; safe no-op otherwise  
+- [ ] `migrate` run if this WASM introduces schema changes; safe no-op otherwise
 
 ---
 
@@ -137,18 +137,18 @@ soroban contract invoke --id <CONTRACT_ID> --network mainnet -- get_schema_versi
 # Expected: version matching release notes
 ```
 
-- [ ] Health check passes  
-- [ ] Token and admin configured (non-empty)  
-- [ ] Schema version matches release  
+- [ ] Health check passes
+- [ ] Token and admin configured (non-empty)
+- [ ] Schema version matches release
 - [ ] **First-subscriber smoke test** (small amount)
-  1. Approve SAC allowance to the contract  
-  2. `subscribe` with a short-but-valid interval  
-  3. Trigger `charge` after interval (or keeper page)  
-  4. Confirm token balances / events  
+  1. Approve SAC allowance to the contract
+  2. `subscribe` with a short-but-valid interval
+  3. Trigger `charge` after interval (or keeper page)
+  4. Confirm token balances / events
 - [ ] **Monitoring live**
-  - [ ] Keeper metrics + balance alerts ([`KEEPER.md`](KEEPER.md))  
-  - [ ] RPC error-rate alerts  
-  - [ ] Pause / anomaly alerts for ops  
+  - [ ] Keeper metrics + balance alerts ([`KEEPER.md`](KEEPER.md))
+  - [ ] RPC error-rate alerts
+  - [ ] Pause / anomaly alerts for ops
 
 ---
 
@@ -164,24 +164,24 @@ VITE_RPC_URL=https://soroban-mainnet.stellar.org
 VITE_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
 ```
 
-- [ ] Production frontend env updated and redeployed  
-- [ ] Wallet network prompts show **Mainnet** (not Testnet)  
-- [ ] Feature flags / maintenance banner cleared  
+- [ ] Production frontend env updated and redeployed
+- [ ] Wallet network prompts show **Mainnet** (not Testnet)
+- [ ] Feature flags / maintenance banner cleared
 
 ### DNS / CDN
 
-- [ ] Production DNS records point at the go-live frontend  
-- [ ] CDN/cache purged after env deploy  
-- [ ] TLS certificates valid  
-- [ ] Status page / uptime check pointed at production URL  
+- [ ] Production DNS records point at the go-live frontend
+- [ ] CDN/cache purged after env deploy
+- [ ] TLS certificates valid
+- [ ] Status page / uptime check pointed at production URL
 
 ### Public announcement checklist
 
-- [ ] Contract ID + WASM hash published  
-- [ ] Audit report link published  
-- [ ] Known limitations summarized ([`SECURITY.md`](SECURITY.md))  
-- [ ] Support / disclosure channel listed (`security@payflow.dev`)  
-- [ ] Keeper operators notified of Mainnet contract ID and cadence  
+- [ ] Contract ID + WASM hash published
+- [ ] Audit report link published
+- [ ] Known limitations summarized ([`SECURITY.md`](SECURITY.md))
+- [ ] Support / disclosure channel listed (`security@payflow.dev`)
+- [ ] Keeper operators notified of Mainnet contract ID and cadence
 
 ---
 
@@ -189,8 +189,8 @@ VITE_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
 
 FlowPay does not auto-rollback. If a critical issue appears:
 
-1. Admin: `pause_contract()` immediately.  
-2. Follow [`DEPLOYMENT.md` Rollback Procedure](DEPLOYMENT.md#rollback-procedure) to restore a prior WASM hash if required.  
+1. Admin: `pause_contract()` immediately.
+2. Follow [`DEPLOYMENT.md` Rollback Procedure](DEPLOYMENT.md#rollback-procedure) to restore a prior WASM hash if required.
 3. Re-run `verify-contract.sh` and keeper health checks before `unpause_contract()`.
 
 ---
