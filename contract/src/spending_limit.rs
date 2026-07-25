@@ -49,6 +49,17 @@ pub fn get_daily_spent(env: &Env, user: &Address) -> i128 {
         .unwrap_or(0i128)
 }
 
+/// Returns `true` if the user's current day window is active (`DayStart` present).
+///
+/// `DayStart` is a presence marker (unit value), not a wall-clock timestamp.
+/// When it expires from temporary storage (~17,280 ledgers after first spend),
+/// spend tracking resets on the next `pay_per_use` / `pay_per_use_to`.
+pub fn get_day_start(env: &Env, user: &Address) -> bool {
+    env.storage()
+        .temporary()
+        .has(&DataKey::DayStart(user.clone()))
+}
+
 /// Records `amount` as spent today for the user.
 /// Anchors TTL to the first spend of the day using DayStart.
 pub fn record_spend(env: &Env, user: &Address, amount: i128) {

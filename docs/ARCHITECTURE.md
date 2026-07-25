@@ -46,7 +46,7 @@ graph TD
 | `merchant_stats.rs` | Merchant revenue, subscriber counts, and daily revenue buckets. |
 | `migration.rs` | Schema version tracking and storage migration. |
 | `min_interval.rs` | Minimum billing interval floor. |
-| `referral.rs` | Referral storage and lookup. |
+| `referral.rs` | Referral storage and lookup. See [REFERRALS.md](./REFERRALS.md). |
 | `spending_limit.rs` | Temporary daily spending limits for `pay_per_use()`. |
 | `storage.rs` | Shared storage read/write helpers. |
 | `subscription_count.rs` | Active subscription count and append-only subscriber index. |
@@ -128,7 +128,7 @@ FlowPay uses Soroban instance, persistent, and temporary storage deliberately.
 | `MerchantSubCount(merchant)` | Active subscriber count per merchant | persistent |
 | `DailyLimit(user)` | Temporary pay-per-use limit | temporary |
 | `DailySpent(user)` | Temporary pay-per-use spend counter | temporary |
-| `Referral(user)` | Referrer for a subscriber | persistent |
+| `Referral(user)` | Referrer for a subscriber ([REFERRALS.md](./REFERRALS.md)) | persistent |
 | `SubscriptionMeta(user)` | Short subscription label | persistent |
 | `ChargeHistory(user)` | Charge timestamps | persistent |
 | `SubscriberIndex(i)` | Append-only subscriber list entry | persistent |
@@ -148,6 +148,7 @@ Events are emitted from `events.rs` and kept separate from storage mutation so t
 | Event | Trigger |
 | --- | --- |
 | `subscribed` | New or replaced subscription created |
+| `referred` | Referrer stored on subscribe ([REFERRALS.md](./REFERRALS.md)) |
 | `charged` | Successful recurring charge |
 | `pay_per_use` | Successful one-time charge |
 | `cancelled` | Subscription cancelled |

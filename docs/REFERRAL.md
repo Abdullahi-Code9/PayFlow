@@ -2,6 +2,8 @@
 
 This guide explains how the PayFlow referral tracking system works and how to use it to build referral reward programs.
 
+For the full architecture, fee/payout mechanics, referral link workflows, and TypeScript integration examples, see **[`REFERRALS.md`](./REFERRALS.md)** (Referral System Architecture and Integration).
+
 ---
 
 ## Table of Contents
