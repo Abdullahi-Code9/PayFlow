@@ -1543,6 +1543,38 @@ impl FlowPay {
             .instance()
             .set(&DataKey::GlobalVolumeCapOverride, &new_cap);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable fee bounds (governance guardrails)
+    // ─────────────────────────────────────────────────────────────
+
+    /// Admin-only: configures the allowed [min_bps, max_bps] range for
+    /// future fee proposals, guarding against accidental fee misconfiguration
+    /// (e.g. an operator typo setting bps close to 10000).
+    pub fn set_fee_bounds(env: Env, min_bps: u32, max_bps: u32) {
+        admin::require_admin(&env);
+        if min_bps > max_bps || max_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidFeeBounds);
+        }
+        env.storage().instance().set(&DataKey::MinFeeBps, &min_bps);
+        env.storage().instance().set(&DataKey::MaxFeeBps, &max_bps);
+    }
+
+    /// Returns the configured (min_bps, max_bps) fee bounds, defaulting to
+    /// (0, 10000) when governance has not configured explicit bounds.
+    pub fn get_fee_bounds(env: Env) -> (u32, u32) {
+        let min_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinFeeBps)
+            .unwrap_or(0u32);
+        let max_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxFeeBps)
+            .unwrap_or(10_000u32);
+        (min_bps, max_bps)
+    }
 }
 
 /// Refreshes the contract instance's TTL. Instance storage holds shared
