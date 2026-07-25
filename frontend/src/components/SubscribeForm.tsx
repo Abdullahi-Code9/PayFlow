@@ -10,6 +10,7 @@ import BalanceDisplay from "./BalanceDisplay";
 import AllowanceDisplay from "./AllowanceDisplay";
 import ToastContainer from "./Toast";
 import IntervalSelector from "./IntervalSelector";
+import AddressBook from "./AddressBook";
 
 interface Props {
   userKey: string;
@@ -29,6 +30,7 @@ export default function SubscribeForm({
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
+  const [showAddressBook, setShowAddressBook] = useState(false);
   const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
   const { toasts, addToast, removeToast } = useToast();
   const tx = useTransaction();
@@ -104,7 +106,24 @@ export default function SubscribeForm({
           required
         />
         {errors.merchant && <span className="text-error">{errors.merchant}</span>}
+        <button
+          type="button"
+          className="btn-secondary subscribe-form__address-book-btn"
+          onClick={() => setShowAddressBook(true)}
+          aria-label="Select merchant from address book"
+        >
+          📋 Select from Address Book
+        </button>
       </label>
+
+      {showAddressBook && (
+        <AddressBook
+          onSelect={(address) => {
+            setMerchant(address);
+          }}
+          onClose={() => setShowAddressBook(false)}
+        />
+      )}
 
       <BalanceDisplay address={userKey} />
 
