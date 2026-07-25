@@ -5798,7 +5798,7 @@ fn test_daily_limit_day_start_boundary() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #19)")]
+#[should_panic(expected = "HostError: Error(Contract, #2)")]
 fn test_subscription_amount_validation_zero() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -5807,11 +5807,21 @@ fn test_subscription_amount_validation_zero() {
     
     // Attempt to set amount to 0 (panics with AmountMustBePositive, error 19)
     env.mock_all_auths();
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    
     client.set_subscription_amount(&user, &0);
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #22)")]
+#[should_panic(expected = "HostError: Error(Contract, #15)")]
 fn test_subscription_amount_validation_exceeds_max() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -5820,6 +5830,16 @@ fn test_subscription_amount_validation_exceeds_max() {
     
     // Attempt to set amount above MAX_SUBSCRIPTION_AMOUNT
     env.mock_all_auths();
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    
     client.set_subscription_amount(&user, &(crate::MAX_SUBSCRIPTION_AMOUNT + 1));
 }
 

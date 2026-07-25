@@ -872,6 +872,8 @@ impl FlowPay {
         ensure_contract_not_paused(&env);
         admin::require_admin(&env);
 
+        validation::require_valid_amount(&env, new_amount);
+
         let key = DataKey::Subscription(user.clone());
 
         let mut sub: Subscription = env
@@ -879,8 +881,6 @@ impl FlowPay {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
-
-        validation::require_valid_amount(&env, new_amount);
 
         let old_amount = sub.amount;
         sub.amount = new_amount;
