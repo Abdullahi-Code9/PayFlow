@@ -1575,6 +1575,19 @@ impl FlowPay {
             .unwrap_or(10_000u32);
         (min_bps, max_bps)
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Lightweight subscription reads
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns just the merchant address for a user's subscription, without
+    /// decoding the full `Subscription` struct. Lighter-weight than
+    /// `get_subscription` for callers that only need to know which merchant
+    /// a user subscribes to.
+    pub fn get_subscriber_merchant(env: Env, user: Address) -> Option<Address> {
+        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+        Some(sub.merchant)
+    }
 }
 
 /// Refreshes the contract instance's TTL. Instance storage holds shared
