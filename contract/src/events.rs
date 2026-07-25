@@ -171,6 +171,11 @@ pub fn publish_fee_cleared(env: &Env) {
     env.events()
         .publish((Symbol::new(env, "fee_cleared"),), ());
 }
+
+pub fn publish_daily_window_started(env: &Env, user: &Address) {
+    env.events()
+        .publish((Symbol::new(env, "daily_window_started"), user.clone()), ());
+}
 pub fn publish_subscription_amount_updated(
     env: &Env,
     user: &Address,
