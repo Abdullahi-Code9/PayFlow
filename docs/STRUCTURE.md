@@ -156,6 +156,14 @@ docs/
 ├── ONBOARDING.md          # First-issue contributor walkthrough
 ├── STRUCTURE.md           # This file
 └── SECURITY.md            # Security model and disclosure policy
+├── ARCHITECTURE.md          # System design, data model, storage strategy
+├── DEPLOYMENT.md            # Build, deploy, keeper setup
+├── TESTING.md               # How to run and write tests
+├── API.md                   # Full contract function reference
+├── INTEGRATION-GUIDE.md     # Subscriber-side integration walkthrough
+├── MERCHANT-INTEGRATION.md  # Merchant onboarding, revenue, events, withdraw
+├── STRUCTURE.md             # This file
+└── SECURITY.md              # Security model and disclosure policy
 ```
 
 ---

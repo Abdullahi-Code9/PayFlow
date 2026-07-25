@@ -117,6 +117,8 @@ The receiving party for subscription payments and protocol-fee splits. Merchants
 
 Source: `contract/src/whitelist.rs`, `contract/src/merchant_stats.rs`.
 
+See also: [Merchant Integration Cookbook](./MERCHANT-INTEGRATION.md).
+
 ### Merchant Frozen
 A merchant-level state that prevents charges to a frozen merchant. This is independent of the global contract pause. When enabled, attempts to charge such merchants fail with merchant freeze related errors/panics.
 

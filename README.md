@@ -217,3 +217,4 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 - Full API reference: [`docs/API.md`](docs/API.md)
 - Architecture overview: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Developer Integration Guide: [`docs/INTEGRATION-GUIDE.md`](docs/INTEGRATION-GUIDE.md)
+- Merchant Integration Cookbook: [`docs/MERCHANT-INTEGRATION.md`](docs/MERCHANT-INTEGRATION.md)

@@ -2,7 +2,7 @@
 
 [`docs/EVENTS.md`](EVENTS.md) is a reference: it lists every event the FlowPay contract emits and the shape of its payload. This guide is the companion **cookbook** — it shows you how to actually *build* something on top of those events: a keeper, an analytics pipeline, a notification service, or a reconciliation job.
 
-If you are looking for "what event fires when `X` happens", go to [EVENTS.md](EVENTS.md). If you are looking for "how do I reliably consume these events without missing or double-processing anything", you're in the right place.
+If you are looking for "what event fires when `X` happens", go to [EVENTS.md](EVENTS.md). If you are looking for "how do I reliably consume these events without missing or double-processing anything", you're in the right place. Merchants wiring `subscribed` / `charged` / `cancelled` / `pay_per_use` into a billing dashboard should also read the [Merchant Integration Cookbook](MERCHANT-INTEGRATION.md#4-handling-events).
 
 ---
 
