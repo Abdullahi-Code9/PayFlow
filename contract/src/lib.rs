@@ -739,6 +739,12 @@ impl FlowPay {
         admin::accept_admin(&env);
     }
 
+    /// Returns the proposed admin address awaiting `accept_admin()`, or
+    /// `None` if there is no pending transfer.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        admin::get_pending_admin(&env)
+    }
+
     /// Returns whether the contract is currently paused.
     pub fn is_contract_paused(env: Env) -> bool {
         is_contract_paused(&env)

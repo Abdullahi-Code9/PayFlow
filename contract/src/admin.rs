@@ -23,6 +23,11 @@ pub fn transfer_admin(env: &Env, new_admin: &Address) {
         .set(&DataKey::PendingAdmin, new_admin);
 }
 
+/// Returns the currently proposed admin awaiting `accept_admin()`, if any.
+pub fn get_pending_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::PendingAdmin)
+}
+
 /// Step 2: proposed new admin accepts and becomes the active admin.
 pub fn accept_admin(env: &Env) {
     let pending: Address = env
