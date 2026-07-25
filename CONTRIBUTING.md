@@ -2,6 +2,8 @@
 
 Thank you for considering a contribution to FlowPay. This document covers everything you need to know to get your changes merged cleanly.
 
+> **New to the project?** If this is your first contribution, start with [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a step-by-step walkthrough from environment setup to your first merged PR. Come back here as the reference once you're up and running.
+
 ---
 
 ## Table of Contents
@@ -119,6 +121,8 @@ Branch naming conventions:
 
 ## Frontend Contribution Guidelines
 
+See the full guide: [`docs/CONTRIBUTING-FRONTEND.md`](docs/CONTRIBUTING-FRONTEND.md).
+
 - All contract calls must go through `src/stellar.ts` — React components should never import `@stellar/stellar-sdk` directly
 - Do not add external UI component libraries — keep the bundle minimal
 - Use TypeScript strictly — no `any` unless absolutely necessary and commented
@@ -126,6 +130,7 @@ Branch naming conventions:
 - Run `npm run lint` to check for ESLint errors before submitting
 - Run `npm run format` to auto-format all source files with Prettier
 - Run `npm run build` to confirm there are no TypeScript errors before submitting
+
 
 ---
 

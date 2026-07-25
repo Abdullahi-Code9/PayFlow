@@ -182,7 +182,7 @@ Contract WASM can be replaced by the admin via the `upgrade(new_wasm_hash)` entr
 
 ### What is the difference between Testnet and Mainnet deployments?
 
-FlowPay is **currently deployed on Testnet only** and has not been formally audited — it should not be used to manage real funds on Mainnet until an independent Soroban security audit is completed and published. The frontend targets the network specified by three environment variables in `frontend/.env`: `VITE_CONTRACT_ID` (your deployed contract address), `VITE_RPC_URL` (defaults to `https://soroban-testnet.stellar.org`), and `VITE_NETWORK_PASSPHRASE` (defaults to `Networks.TESTNET`). Switching to Mainnet requires updating all three variables to point to your Mainnet contract and RPC endpoint. The planned audit roadmap is documented in [Security](docs/SECURITY.md#audit-roadmap).
+FlowPay is **currently deployed on Testnet only** and has not been formally audited — it should not be used to manage real funds on Mainnet until an independent Soroban security audit is completed and published. The frontend targets the network specified by three environment variables in `frontend/.env`: `VITE_CONTRACT_ID` (your deployed contract address), `VITE_RPC_URL` (defaults to `https://soroban-testnet.stellar.org`), and `VITE_NETWORK_PASSPHRASE` (defaults to `Networks.TESTNET`). Switching to Mainnet requires updating all three variables to point to your Mainnet contract and RPC endpoint. The planned audit roadmap is documented in [Security](docs/SECURITY.md#audit-roadmap). For the full Mainnet go-live checklist (security gates, key management, deploy, verification, announcement), see [Mainnet Deployment Checklist](docs/MAINNET-DEPLOYMENT.md).
 
 ### Why is `charge()` permissionless — isn't that a security risk?
 
@@ -216,3 +216,6 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 - `pay_per_use(user, amount)` — the function this limit applies to
 - Full API reference: [`docs/API.md`](docs/API.md)
 - Architecture overview: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Developer Integration Guide: [`docs/INTEGRATION-GUIDE.md`](docs/INTEGRATION-GUIDE.md)
+- Mainnet deployment checklist: [`docs/MAINNET-DEPLOYMENT.md`](docs/MAINNET-DEPLOYMENT.md)
+- Merchant Integration Cookbook: [`docs/MERCHANT-INTEGRATION.md`](docs/MERCHANT-INTEGRATION.md)

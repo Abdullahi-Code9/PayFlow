@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { StrKey } from "@stellar/stellar-sdk";
 import { buildSubscribeTx, DEFAULT_TOKEN } from "../stellar";
 import { friendlyError } from "../utils/errors";
 import { STROOPS_PER_XLM, BILLING_INTERVALS } from "../constants"; // BILLING_INTERVALS used for initial value
@@ -11,6 +10,7 @@ import BalanceDisplay from "./BalanceDisplay";
 import AllowanceDisplay from "./AllowanceDisplay";
 import ToastContainer from "./Toast";
 import IntervalSelector from "./IntervalSelector";
+import AddressBook from "./AddressBook";
 
 interface Props {
   userKey: string;
@@ -20,10 +20,17 @@ interface Props {
   onSubscribed?: () => void;
 }
 
-export default function SubscribeForm({ userKey, onSign, onSuccess, announce, onSubscribed }: Props) {
+export default function SubscribeForm({
+  userKey,
+  onSign,
+  onSuccess,
+  announce,
+  onSubscribed,
+}: Props) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
+  const [showAddressBook, setShowAddressBook] = useState(false);
   const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
   const { toasts, addToast, removeToast } = useToast();
   const tx = useTransaction();
@@ -45,14 +52,6 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce, on
     }
   }, [debouncedMerchant, validateAsync]);
 
-  function validateReferrer(value: string): string | null {
-    if (!value) return null; // Optional field
-    if (!StrKey.isValidEd25519PublicKey(value)) {
-      return "Invalid Stellar address format";
-    }
-    return null;
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const isValidAsync = await validateAsync({ merchant, amount, interval });
@@ -61,7 +60,15 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce, on
     announce("Transaction submitted");
     const hash = await tx.submit(async () => {
       const stroops = BigInt(Math.round(parseFloat(amount) * STROOPS_PER_XLM));
-      const xdr = await buildSubscribeTx(userKey, merchant, stroops, BigInt(interval), DEFAULT_TOKEN, null, "");
+      const xdr = await buildSubscribeTx(
+        userKey,
+        merchant,
+        stroops,
+        BigInt(interval),
+        DEFAULT_TOKEN,
+        null,
+        ""
+      );
       return onSign(xdr);
     });
 
@@ -99,7 +106,24 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce, on
           required
         />
         {errors.merchant && <span className="text-error">{errors.merchant}</span>}
+        <button
+          type="button"
+          className="btn-secondary subscribe-form__address-book-btn"
+          onClick={() => setShowAddressBook(true)}
+          aria-label="Select merchant from address book"
+        >
+          📋 Select from Address Book
+        </button>
       </label>
+
+      {showAddressBook && (
+        <AddressBook
+          onSelect={(address) => {
+            setMerchant(address);
+          }}
+          onClose={() => setShowAddressBook(false)}
+        />
+      )}
 
       <BalanceDisplay address={userKey} />
 
@@ -136,4 +160,3 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce, on
     </form>
   );
 }
-

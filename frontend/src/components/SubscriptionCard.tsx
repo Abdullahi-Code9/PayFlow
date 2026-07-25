@@ -3,12 +3,16 @@ import CopyButton from "./CopyButton";
 import NextChargeCountdown from "./NextChargeCountdown";
 import { Subscription } from "../types";
 import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
+import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
+import { usePauseResume } from "../hooks/usePauseResume";
+import { useRegisterShortcuts } from "../context/ShortcutRegistry";
+import { buildCancelTx } from "../stellar";
 
 interface SubscriptionCardProps {
   subscription: Subscription;
-  onCancel: () => void;
-  onPause: (xdr: string) => Promise<string>;
+  onSign: (xdr: string) => Promise<string>;
   onRefresh: () => void;
+  onCancelled?: () => void;
 }
 
 function formatInterval(secs: number): string {
@@ -33,10 +37,7 @@ function formatTrialStatus(
   const now = Math.floor(Date.now() / 1000);
   const isInTrial = now < trialEndTimestamp;
   const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
-  const trialDaysRemaining = Math.max(
-    0,
-    Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60))
-  );
+  const trialDaysRemaining = Math.max(0, Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60)));
 
   return { isInTrial, trialEndDate, trialDaysRemaining };
 }
@@ -44,64 +45,97 @@ function formatTrialStatus(
 export default function SubscriptionCard({
   subscription,
   userKey,
-  onCancel,
-  onPause,
+  onSign,
   onRefresh,
+  onCancelled,
 }: SubscriptionCardProps & { userKey: string }) {
+  const { mutate } = useSubscriptionSync(userKey);
   const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
   const nextChargeTimestamp = last_charged + interval;
   const xlm = (Number(amount) / STROOPS_PER_XLM).toFixed(2);
   const { isInTrial } = formatTrialStatus(trial_duration || 0, last_charged);
 
   const [showPauseConfirm, setShowPauseConfirm] = React.useState(false);
-  const [pauseLoading, setPauseLoading] = React.useState(false);
-  const [resumeLoading, setResumeLoading] = React.useState(false);
-  const [pauseStatus, setPauseStatus] = React.useState("");
+  const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
+  const [cancelLoading, setCancelLoading] = React.useState(false);
+  const [cancelStatus, setCancelStatus] = React.useState("");
+
+  const { pause, resume, pauseTx, resumeTx } = usePauseResume(userKey, onSign, onRefresh);
+
+  useRegisterShortcuts(
+    active
+      ? [
+          {
+            key: "x",
+            description: "Cancel active subscription",
+            action: () => {
+              setShowCancelConfirm(true);
+            },
+          },
+        ]
+      : []
+  );
+
+  const handleCancel = async () => {
+    setCancelLoading(true);
+    setCancelStatus("");
+    try {
+      await mutate(
+        "cancel",
+        async () => {
+          const xdr = await buildCancelTx(userKey);
+          return onSign(xdr);
+        },
+        { active: false }
+      );
+      setCancelStatus("Cancelled successfully.");
+      setShowCancelConfirm(false);
+      onCancelled?.();
+    } catch (e: unknown) {
+      setCancelStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCancelLoading(false);
+    }
+  };
 
   const handlePause = async () => {
-    setPauseLoading(true);
-    setPauseStatus("");
     try {
-      // We pass userKey to the parent which handles the TX.
-      // But we can just use the provided onPause callback which takes XDR.
-      // Wait, onPause expects XDR. We should build it here.
-      const { buildPauseTx } = await import("../stellar");
-      const xdr = await buildPauseTx(userKey);
-      await onPause(xdr);
-      setPauseStatus("Paused successfully.");
+      await pause();
       setShowPauseConfirm(false);
-      onRefresh();
-    } catch (e: any) {
-      setPauseStatus(`Error: ${e.message}`);
-    } finally {
-      setPauseLoading(false);
+    } catch {
+      // pauseTx.error holds the failure reason
     }
   };
 
   const handleResume = async () => {
-    setResumeLoading(true);
-    setPauseStatus("");
     try {
-      const { buildResumeTx } = await import("../stellar");
-      const xdr = await buildResumeTx(userKey);
-      await onPause(xdr); // use same onSign equivalent callback
-      setPauseStatus("Resumed successfully.");
-      onRefresh();
-    } catch (e: any) {
-      setPauseStatus(`Error: ${e.message}`);
-    } finally {
-      setResumeLoading(false);
+      await resume();
+    } catch {
+      // resumeTx.error holds the failure reason
     }
   };
+
+  let derivedPauseStatus = "";
+  if (pauseTx.state === "pending") {
+    derivedPauseStatus = "Pausing…";
+  } else if (pauseTx.state === "success") {
+    derivedPauseStatus = "Paused successfully.";
+  } else if (pauseTx.state === "failed") {
+    derivedPauseStatus = `Error: ${pauseTx.error || "Failed to pause"}`;
+  } else if (resumeTx.state === "pending") {
+    derivedPauseStatus = "Resuming…";
+  } else if (resumeTx.state === "success") {
+    derivedPauseStatus = "Resumed successfully.";
+  } else if (resumeTx.state === "failed") {
+    derivedPauseStatus = `Error: ${resumeTx.error || "Failed to resume"}`;
+  }
 
   return (
     <div className="card">
       <div className="subscription-card__header">
         <div>
           <h2 className="subscription-card__title">Your Subscription</h2>
-          {subscription.label && (
-            <p className="subscription-card__label">{subscription.label}</p>
-          )}
+          {subscription.label && <p className="subscription-card__label">{subscription.label}</p>}
         </div>
         <span className={`badge ${active ? "badge-active" : "badge-inactive"}`}>
           {active ? (isInTrial ? "Trial Active" : "Active") : "Cancelled"}
@@ -138,17 +172,29 @@ export default function SubscriptionCard({
             <button onClick={() => setShowPauseConfirm(true)} className="btn-secondary pause-btn">
               Pause
             </button>
-            <button onClick={onCancel} className="btn-danger cancel-btn" aria-label="Cancel subscription">
+            <button
+              onClick={() => setShowCancelConfirm(true)}
+              className="btn-danger cancel-btn"
+              aria-label="Cancel subscription"
+            >
               Cancel
             </button>
           </>
         )}
         {active && paused && (
           <>
-            <button onClick={handleResume} disabled={resumeLoading} className="btn-primary resume-btn">
-              {resumeLoading ? "Resuming…" : "Resume"}
+            <button
+              onClick={handleResume}
+              disabled={resumeTx.state === "pending"}
+              className="btn-primary resume-btn"
+            >
+              {resumeTx.state === "pending" ? "Resuming…" : "Resume"}
             </button>
-            <button onClick={onCancel} className="btn-danger cancel-btn" aria-label="Cancel subscription">
+            <button
+              onClick={() => setShowCancelConfirm(true)}
+              className="btn-danger cancel-btn"
+              aria-label="Cancel subscription"
+            >
               Cancel
             </button>
           </>
@@ -164,22 +210,46 @@ export default function SubscriptionCard({
               <button onClick={() => setShowPauseConfirm(false)} className="btn-secondary">
                 Cancel
               </button>
-              <button onClick={handlePause} disabled={pauseLoading} className="btn-primary">
-                {pauseLoading ? "Pausing…" : "Pause"}
+              <button
+                onClick={handlePause}
+                disabled={pauseTx.state === "pending"}
+                className="btn-primary"
+              >
+                {pauseTx.state === "pending" ? "Pausing…" : "Pause"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {pauseStatus && (
+      {showCancelConfirm && (
+        <div className="modal-overlay" onClick={() => setShowCancelConfirm(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Cancel subscription?</h3>
+            <p>Are you sure you want to cancel your subscription? This cannot be undone.</p>
+            <div className="modal-actions">
+              <button onClick={() => setShowCancelConfirm(false)} className="btn-secondary">
+                Back
+              </button>
+              <button onClick={handleCancel} disabled={cancelLoading} className="btn-danger">
+                {cancelLoading ? "Cancelling…" : "Confirm Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(derivedPauseStatus || cancelStatus) && (
         <p
           className="form-status"
           style={{
-            color: pauseStatus.startsWith("Error") ? "var(--color-danger)" : "var(--color-success)",
+            color:
+              derivedPauseStatus.startsWith("Error") || cancelStatus.startsWith("Error")
+                ? "var(--color-danger)"
+                : "var(--color-success)",
           }}
         >
-          {pauseStatus}
+          {derivedPauseStatus || cancelStatus}
         </p>
       )}
     </div>

@@ -125,9 +125,17 @@ Form component for creating a new subscription. Accepts merchant address, XLM am
 
 Displays the user's active subscription. Shows merchant, amount, interval, and next charge date. Provides cancel and pay-per-use actions.
 
+### `frontend/src/pages/AdminDashboard.tsx`
+
+Administrative tools layout. Hosts the Subscription Repair panel for on-chain diagnostics and recovery.
+
+### `frontend/src/components/admin/SubscriptionRepairPanel.tsx`
+
+Admin-only subscription integrity panel. Calls `validate_subscription` (read-only simulation) and `repair_subscription` (admin-auth transaction). Authorization is enforced by comparing the connected wallet to `get_admin`.
+
 ### `frontend/src/App.tsx`
 
-Root component. Manages wallet connection state and tab switching between `SubscribeForm` and `Dashboard`.
+Root component. Manages wallet connection state and tab switching between `SubscribeForm`, `Dashboard`, `MerchantDashboard`, and `AdminDashboard`.
 
 ---
 
@@ -141,8 +149,29 @@ docs/
 ├── DEPLOYMENT.md     # Build, deploy, keeper setup
 ├── TESTING.md        # How to run and write tests
 ├── API.md            # Full contract function reference
+├── REFERRALS.md      # Referral architecture, payouts, and integration
+├── REFERRAL.md       # Short referral usage guide
 ├── STRUCTURE.md      # This file
 └── SECURITY.md       # Security model and disclosure policy
+├── ARCHITECTURE.md        # System design, data model, storage strategy
+├── DEPLOYMENT.md          # Build, deploy, keeper setup
+├── TESTING.md             # How to run and write tests
+├── API.md                 # Full contract function reference
+├── EVENTS.md              # Contract event payload/schema reference
+├── EVENT-DRIVEN-GUIDE.md  # Cookbook: consume events, dedupe, react, reliability
+├── INTEGRATION-GUIDE.md   # Third-party app integration
+├── KEEPER.md              # Keeper bot operations
+├── ONBOARDING.md          # First-issue contributor walkthrough
+├── STRUCTURE.md           # This file
+└── SECURITY.md            # Security model and disclosure policy
+├── ARCHITECTURE.md          # System design, data model, storage strategy
+├── DEPLOYMENT.md            # Build, deploy, keeper setup
+├── TESTING.md               # How to run and write tests
+├── API.md                   # Full contract function reference
+├── INTEGRATION-GUIDE.md     # Subscriber-side integration walkthrough
+├── MERCHANT-INTEGRATION.md  # Merchant onboarding, revenue, events, withdraw
+├── STRUCTURE.md             # This file
+└── SECURITY.md              # Security model and disclosure policy
 ```
 
 ---
