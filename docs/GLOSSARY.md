@@ -63,9 +63,9 @@ Source: `contract/src/spending_limit.rs`, `DataKey::DailySpent(user)`.
 ## E
 
 ### Events
-The contract emits structured events for key lifecycle operations and state transitions. Off-chain services (indexers, dashboards) rely on these events for analytics and for driving keeper workflows. See `docs/EVENTS.md` for the canonical schema.
+The contract emits structured events for key lifecycle operations and state transitions. Off-chain services (indexers, dashboards) rely on these events for analytics and for driving keeper workflows. See `docs/EVENTS.md` for the canonical schema, and `docs/EVENT-DRIVEN-GUIDE.md` for polling, deduplication, reaction patterns, and reliability.
 
-Source: `contract/src/events.rs`, `docs/EVENTS.md`.
+Source: `contract/src/events.rs`, `docs/EVENTS.md`, `docs/EVENT-DRIVEN-GUIDE.md`.
 
 ## F
 
@@ -117,6 +117,8 @@ The receiving party for subscription payments and protocol-fee splits. Merchants
 
 Source: `contract/src/whitelist.rs`, `contract/src/merchant_stats.rs`.
 
+See also: [Merchant Integration Cookbook](./MERCHANT-INTEGRATION.md).
+
 ### Merchant Frozen
 A merchant-level state that prevents charges to a frozen merchant. This is independent of the global contract pause. When enabled, attempts to charge such merchants fail with merchant freeze related errors/panics.
 
@@ -152,7 +154,7 @@ Source: `contract/src/lib.rs`, `ProtocolStats` struct.
 ## R
 
 ### Referrer
-An optional address recorded at subscription creation time. The contract stores the referrer for later retrieval and emits a `referred` event. This can be used to support referral analytics.
+An optional address recorded at subscription creation time. The contract stores the referrer for later retrieval and emits a `referred` event. This can be used to support referral analytics. PayFlow does not automatically pay referrers on-chain; see [REFERRALS.md](./REFERRALS.md) for architecture and off-chain payout patterns.
 
 Source: `contract/src/referral.rs`, `get_referrer()`, `DataKey::Referral(user)`.
 

@@ -4,6 +4,94 @@ This document tracks the current public contract surface in [contract/src/lib.rs
 
 ---
 
+## Table of Contents
+
+- [Data Types](#data-types)
+  - [Subscription](#subscription)
+  - [ChargeResult](#chargeresult)
+  - [ProtocolStats](#protocolstats)
+  - [HealthReport](#healthreport)
+  - [DataKey](#datakey)
+- [Functions](#functions)
+  - [initialize](#initialize)
+  - [subscribe](#subscribe)
+  - [subscribe\_with\_metadata](#subscribe_with_metadata)
+  - [charge](#charge)
+  - [extend\_subscription\_ttl](#extend_subscription_ttl)
+  - [pay\_per\_use](#pay_per_use)
+  - [cancel](#cancel)
+  - [pause](#pause)
+  - [resume](#resume)
+  - [transfer\_admin](#transfer_admin)
+  - [accept\_admin](#accept_admin)
+  - [is\_contract\_paused](#is_contract_paused)
+  - [get\_admin](#get_admin)
+  - [get\_token](#get_token)
+  - [upgrade](#upgrade)
+  - [get\_subscription](#get_subscription)
+  - [next\_charge\_at](#next_charge_at)
+  - [is\_charge\_due](#is_charge_due)
+  - [get\_trial\_end](#get_trial_end)
+  - [propose\_grace\_period](#propose_grace_period)
+  - [commit\_grace\_period](#commit_grace_period)
+  - [get\_grace\_period](#get_grace_period)
+  - [set\_subscription\_amount](#set_subscription_amount)
+  - [set\_subscription\_interval](#set_subscription_interval)
+  - [set\_min\_interval](#set_min_interval)
+  - [get\_min\_interval](#get_min_interval)
+  - [add\_merchant](#add_merchant)
+  - [remove\_merchant](#remove_merchant)
+  - [set\_whitelist\_enabled](#set_whitelist_enabled)
+  - [is\_whitelist\_enabled](#is_whitelist_enabled)
+  - [is\_merchant\_whitelisted](#is_merchant_whitelisted)
+  - [freeze\_merchant](#freeze_merchant)
+  - [unfreeze\_merchant](#unfreeze_merchant)
+  - [bump\_merchant\_revenue\_day](#bump_merchant_revenue_day)
+  - [prune\_merchant\_revenue\_days](#prune_merchant_revenue_days)
+  - [get\_merchant\_revenue\_day](#get_merchant_revenue_day)
+  - [is\_merchant\_frozen](#is_merchant_frozen)
+  - [get\_fee](#get_fee)
+  - [propose\_fee](#propose_fee)
+  - [commit\_fee](#commit_fee)
+  - [batch\_charge](#batch_charge)
+  - [get\_active\_count](#get_active_count)
+  - [get\_subscriber\_count](#get_subscriber_count)
+  - [get\_subscriber\_at](#get_subscriber_at)
+  - [get\_subscriber\_page](#get_subscriber_page)
+  - [get\_merchant\_revenue](#get_merchant_revenue)
+  - [get\_merchant\_revenue\_history](#get_merchant_revenue_history)
+  - [clear\_merchant\_revenue\_history](#clear_merchant_revenue_history)
+  - [get\_merchant\_subscriber\_count](#get_merchant_subscriber_count)
+  - [reset\_merchant\_revenue](#reset_merchant_revenue)
+  - [withdraw\_merchant\_revenue](#withdraw_merchant_revenue)
+  - [set\_daily\_limit](#set_daily_limit)
+  - [remove\_daily\_limit](#remove_daily_limit)
+  - [get\_daily\_limit](#get_daily_limit)
+  - [get\_daily\_spent](#get_daily_spent)
+  - [get\_referrer](#get_referrer)
+  - [migrate](#migrate)
+  - [get\_schema\_version](#get_schema_version)
+  - [set\_metadata](#set_metadata)
+  - [get\_metadata](#get_metadata)
+  - [get\_subscription\_label](#get_subscription_label)
+  - [clear\_metadata](#clear_metadata)
+  - [get\_charge\_history](#get_charge_history)
+  - [get\_protocol\_stats](#get_protocol_stats)
+  - [pause\_contract](#pause_contract)
+  - [unpause\_contract](#unpause_contract)
+  - [set\_initial\_admin](#set_initial_admin)
+  - [contract\_health\_check](#contract_health_check)
+  - [clear\_charge\_history](#clear_charge_history)
+  - [get\_charge\_history\_page](#get_charge_history_page)
+  - [transfer\_subscription](#transfer_subscription)
+  - [validate\_subscription](#validate_subscription)
+  - [repair\_subscription](#repair_subscription)
+- [Units & Conversions](#units--conversions)
+- [Events Reference](#events-reference)
+- [Error Codes](#error-codes)
+
+---
+
 ## Data Types
 
 ### `Subscription`
@@ -448,51 +536,122 @@ soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_subscription
 
 ### `next_charge_at`
 
+Read-only view. Returns the Unix timestamp of the next scheduled charge for a user.
+
 ```
 next_charge_at(env: Env, user: Address) -> Option<u64>
 ```
 
-Auth: none.
+**Parameters**
 
-Returns: `Option<u64>`.
+| Name | Type | Description |
+| --- | --- | --- |
+| `user` | `Address` | The subscriber address to query. |
 
-CLI example:
+**Auth:** None.
+
+**Returns:** `Option<u64>` — `Some(last_charged + interval)` if the subscription is active and not paused. Returns `None` when:
+- No subscription exists for `user`
+- The subscription is inactive (cancelled, `active == false`)
+- The subscription is paused (`paused == true`)
+
+The returned timestamp does not change between charges; it reflects the scheduled billing time regardless of whether the charge has been triggered yet.
+
+**Storage read:** `DataKey::Subscription(user)` in persistent storage.
+
+**See also:** [`is_charge_due`](#is_charge_due) to test whether the charge window is open right now; [`get_subscription`](#get_subscription) to inspect the full record.
+
+**CLI example**
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- next_charge_at --user <USER_ADDRESS>
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- next_charge_at \
+  --user <USER_ADDRESS>
 ```
 
+---
+
 ### `is_charge_due`
+
+Read-only predicate. Returns `true` when a subscriber has a charge due at the current ledger timestamp — that is, when calling `charge(user)` right now would succeed rather than panic.
 
 ```
 is_charge_due(env: Env, user: Address) -> bool
 ```
 
-Auth: none.
+**Parameters**
 
-Returns: `bool`.
+| Name | Type | Description |
+| --- | --- | --- |
+| `user` | `Address` | The subscriber address to test. |
 
-CLI example:
+**Auth:** None.
+
+**Returns:** `bool` — `true` when all of the following conditions hold simultaneously:
+- A subscription exists for `user`
+- The subscription is active (`active == true`) and not paused (`paused == false`)
+- `now >= next_charge_at` — the billing interval has elapsed
+- `now <= next_charge_at + grace_period` — the charge is still within the grace window (this condition is skipped when `grace_period == 0`)
+
+Returns `false` for any absent subscription, inactive or paused subscription, interval not yet elapsed, or expired grace window.
+
+**Storage read:** `DataKey::Subscription(user)` in persistent storage; `DataKey::GracePeriod` in instance storage.
+
+**Usage for keepers:** Poll `is_charge_due` for each subscriber before deciding whether to submit a `charge()` transaction, saving gas on calls that would revert.
+
+**See also:** [`next_charge_at`](#next_charge_at) for the exact scheduled timestamp; [`get_grace_period`](#get_grace_period) for the contract-wide grace window; [`charge`](#charge) for the write operation.
+
+**CLI example**
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- is_charge_due --user <USER_ADDRESS>
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- is_charge_due \
+  --user <USER_ADDRESS>
 ```
 
+---
+
 ### `get_trial_end`
+
+Read-only view. Returns the Unix timestamp when a subscriber's trial period ends, or `None` if the subscriber is not currently in a trial or has no subscription.
 
 ```
 get_trial_end(env: Env, user: Address) -> Option<u64>
 ```
 
-Auth: none.
+**Parameters**
 
-Returns: `Option<u64>`.
+| Name | Type | Description |
+| --- | --- | --- |
+| `user` | `Address` | The subscriber address to query. |
 
-CLI example:
+**Auth:** None.
+
+**Returns:** `Option<u64>` — Unix timestamp (seconds) of trial expiry when `last_charged > now`, otherwise `None`.
+
+**How trials work:** When `subscribe()` is called with a `trial_period` of `N` seconds, the contract sets `last_charged = now + N` instead of `now`. This pushes the first eligible charge forward by the trial duration. `get_trial_end` returns `Some(last_charged)` while that timestamp is still in the future, indicating the subscriber is actively in a trial. Once the trial expires — that is, once `last_charged <= now` — this function returns `None` because the first charge window has opened. No separate storage key is used; the trial end is encoded directly in `last_charged`.
+
+Returns `None` if no subscription exists for `user`.
+
+**Storage read:** `DataKey::Subscription(user)` in persistent storage (reads `last_charged` field).
+
+**See also:** [`subscribe`](#subscribe) for the `trial_period` parameter; [`next_charge_at`](#next_charge_at) which returns `Some(last_charged + interval)` once the trial ends.
+
+**CLI example**
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_trial_end --user <USER_ADDRESS>
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- get_trial_end \
+  --user <USER_ADDRESS>
 ```
+
+---
 
 ### `propose_grace_period`
 
@@ -536,19 +695,32 @@ soroban contract invoke --id <CONTRACT_ID> --source <ADMIN_KEY> --network testne
 
 ### `get_grace_period`
 
+Read-only view. Returns the current contract-wide grace period in seconds.
+
 ```
 get_grace_period(env: Env) -> u64
 ```
 
-Auth: none.
+**Auth:** None.
 
-Returns: `u64`.
+**Returns:** `u64` — grace period in seconds. Returns `0` when no grace period has been configured, which means charges must arrive exactly at or after `next_charge_at` with no tolerance window.
 
-CLI example:
+**What the grace period means:** After a billing interval elapses, keepers have a window of `grace_period` seconds in which to submit `charge()`. Concretely, `charge()` accepts a call only while `now` falls within `[next_charge_at, next_charge_at + grace_period]`. Calls that arrive after this window panic with `"grace period elapsed"`. In `batch_charge`, users whose grace window has closed are returned as `ChargeResult::GracePeriodElapsed` without aborting the batch.
+
+**Storage read:** `DataKey::GracePeriod` in instance storage. Defaults to `0` when the key is absent.
+
+**See also:** [`propose_grace_period`](#propose_grace_period) and [`commit_grace_period`](#commit_grace_period) to change this value (admin, two-step); [`is_charge_due`](#is_charge_due) which incorporates the grace window into its result.
+
+**CLI example**
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_grace_period
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- get_grace_period
 ```
+
+---
 
 ### `set_subscription_amount`
 
@@ -606,19 +778,32 @@ soroban contract invoke --id <CONTRACT_ID> --source <ADMIN_KEY> --network testne
 
 ### `get_min_interval`
 
+Read-only view. Returns the minimum allowed subscription interval in seconds.
+
 ```
 get_min_interval(env: Env) -> u64
 ```
 
-Auth: none.
+**Auth:** None.
 
-Returns: `u64`.
+**Returns:** `u64` — minimum interval in seconds. **Default: `3600` (1 hour)** when `set_min_interval` has never been called.
 
-CLI example:
+**What this controls:** When `subscribe()` or `set_subscription_interval()` is called, the requested `interval` is validated against this floor. Any attempt to create or update a subscription with `interval < get_min_interval()` will panic with `ContractError::IntervalTooShort`. The floor prevents subscriptions from being charged too frequently (e.g. every second), protecting both users and the network from spam.
+
+**Storage read:** `DataKey::MinInterval` in instance storage. Falls back to the compile-time constant `DEFAULT_MIN_INTERVAL = 3600` when the key is absent.
+
+**See also:** [`set_min_interval`](#set_min_interval) to change this value (admin only); [`subscribe`](#subscribe) and [`set_subscription_interval`](#set_subscription_interval) which enforce it.
+
+**CLI example**
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_min_interval
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- get_min_interval
 ```
+
+---
 
 ### `add_merchant`
 
@@ -635,6 +820,8 @@ CLI example:
 ```bash
 soroban contract invoke --id <CONTRACT_ID> --source <ADMIN_KEY> --network testnet -- add_merchant --merchant <MERCHANT_ADDRESS>
 ```
+
+*See also: [Merchant Integration Cookbook — Getting Started](./MERCHANT-INTEGRATION.md#1-getting-started) for whitelist request flow.*
 
 ### `remove_merchant`
 
@@ -994,6 +1181,24 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_merchant_subscriber_count --merchant <MERCHANT_ADDRESS>
 ```
 
+### `get_merchant_sub_count`
+
+```
+get_merchant_sub_count(env: Env, merchant: Address) -> u32
+```
+
+Auth: none.
+
+Returns: `u32` — active subscriber count for `merchant` (same `MerchantSubCount` storage as `get_merchant_subscriber_count`, narrowed to `u32`).
+
+CLI example:
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_merchant_sub_count --merchant <MERCHANT_ADDRESS>
+```
+
+*See also: [Merchant Integration Cookbook — Monitoring Subscribers](./MERCHANT-INTEGRATION.md#3-monitoring-subscribers).*
+
 ### `reset_merchant_revenue`
 
 ```
@@ -1032,6 +1237,8 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --source <MERCHANT_KEY> --network testnet -- withdraw_merchant_revenue --merchant <MERCHANT_ADDRESS>
 ```
 
+*See also: [Merchant Integration Cookbook](./MERCHANT-INTEGRATION.md) for the full merchant onboarding → revenue → withdraw path.*
+
 ### `set_daily_limit`
 
 ```
@@ -1068,36 +1275,25 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --source <USER_KEY> --network testnet -- remove_daily_limit --user <USER_ADDRESS>
 ```
 
-### `get_daily_limit`
-
-```
-get_daily_limit(env: Env, user: Address) -> Option<i128>
-```
-
-Auth: none.
-
-Returns: `Option<i128>`.
-
-CLI example:
-
-```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_daily_limit --user <USER_ADDRESS>
-```
-
 ### `get_daily_spent`
 
+See the [full reference entry below](#get_daily_spent).
+
+### `get_day_start`
+
 ```
-get_daily_spent(env: Env, user: Address) -> i128
+get_day_start(env: Env, user: Address) -> bool
 ```
 
 Auth: none.
 
-Returns: `i128`.
+Returns: `bool` — `true` if `DataKey::DayStart(user)` exists (current ~24h spend window is active), `false` otherwise. This is a presence marker, not a wall-clock timestamp.
 
 CLI example:
+*See also: [Daily Spending Limits Deep-Dive](./DAILY-LIMITS.md).*
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_daily_spent --user <USER_ADDRESS>
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_day_start --user <USER_ADDRESS>
 ```
 
 ### `get_referrer`
@@ -1134,19 +1330,7 @@ soroban contract invoke --id <CONTRACT_ID> --network testnet -- migrate --users 
 
 ### `get_schema_version`
 
-```
-get_schema_version(env: Env) -> u32
-```
-
-Auth: none.
-
-Returns: `u32`.
-
-CLI example:
-
-```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_schema_version
-```
+See the [full reference entry below](#get_schema_version).
 
 ### `set_metadata`
 
@@ -1516,7 +1700,7 @@ All amounts are in stroops. 1 XLM = 10,000,000 stroops. Intervals are
 
 ## Events Reference
 
-See [EVENTS.md](./EVENTS.md) for the complete event schema reference.
+See [EVENTS.md](./EVENTS.md) for the complete event schema reference. For building keepers, analytics, notifications, or reconciliation jobs on top of those events, see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 **Parameters**
 
@@ -1727,35 +1911,7 @@ soroban contract invoke \
 
 ### `next_charge_at`
 
-Read-only view function. Returns the Unix timestamp of the next scheduled charge for a user.
-
-```
-next_charge_at(env: Env, user: Address) -> Option<u64>
-```
-
-**Parameters**
-
-| Name | Type | Description |
-| --- | --- | --- |
-| `user` | `Address` | The subscriber address to look up. |
-
-**Auth:** None.
-
-**Returns:** `Option<u64>` — Returns `None` if:
-- No subscription exists for the user
-- The subscription is inactive (cancelled)
-
-Returns `Some(last_charged + interval)` if the subscription is active.
-
-**CLI example**
-
-```bash
-soroban contract invoke \
-  --id <CONTRACT_ID> \
-  --network testnet \
-  -- next_charge_at \
-  --user <USER_ADDRESS>
-```
+See the [full reference entry above](#next_charge_at).
 
 ---
 
@@ -1908,7 +2064,7 @@ soroban contract invoke \
 
 ### `get_daily_limit`
 
-Returns the current daily spending limit for the calling user, or `None` if no limit is set.
+Read-only view. Returns the current daily spending cap for a user's `pay_per_use()` calls, or `None` if no cap has been set.
 
 ```
 get_daily_limit(env: Env, user: Address) -> Option<i128>
@@ -1922,9 +2078,11 @@ get_daily_limit(env: Env, user: Address) -> Option<i128>
 
 **Auth:** None.
 
-**Returns:** `Option<i128>` — current daily limit in stroops, or `None` if unset.
+**Returns:** `Option<i128>` — the daily limit in stroops, or `None` if no limit has been set for this user. A `None` result means `pay_per_use()` is uncapped for this user.
 
-**Storage read:** `DataKey::DailyLimit(user)` in temporary storage.
+**Storage read:** `DataKey::DailyLimit(user)` in temporary storage (TTL ≈ 1 day, ~17,280 ledgers at 5 s/ledger). Returns `None` automatically once the TTL expires, which resets the cap each day without manual intervention.
+
+**See also:** [`set_daily_limit`](#set_daily_limit) to configure the cap; [`remove_daily_limit`](#remove_daily_limit) to clear it; [`get_daily_spent`](#get_daily_spent) to check how much has been consumed today.
 
 **CLI example**
 
@@ -1940,7 +2098,7 @@ soroban contract invoke \
 
 ### `get_daily_spent`
 
-Returns the amount spent today by the calling user via `pay_per_use()`.
+Read-only view. Returns the total amount spent today by a user via `pay_per_use()` calls.
 
 ```
 get_daily_spent(env: Env, user: Address) -> i128
@@ -1954,9 +2112,13 @@ get_daily_spent(env: Env, user: Address) -> i128
 
 **Auth:** None.
 
-**Returns:** `i128` — amount spent today in stroops. Returns `0` if no spend is recorded.
+**Returns:** `i128` — stroops spent today via `pay_per_use()`. Returns `0` when no spend has been recorded in the current window or when the daily tracking TTL has expired.
 
-**Storage read:** `DataKey::DailySpent(user)` in temporary storage.
+**How the window works:** The first `pay_per_use()` call of the day anchors a `DataKey::DayStart(user)` marker in temporary storage with a TTL of ~17,280 ledgers (≈1 day). `get_daily_spent` returns `0` whenever that marker is absent — either because the user has never called `pay_per_use()`, or because the 24-hour window has expired and both `DayStart` and `DailySpent` have been automatically pruned.
+
+**Storage read:** `DataKey::DayStart(user)` presence check first; then `DataKey::DailySpent(user)` — both in temporary storage.
+
+**See also:** [`set_daily_limit`](#set_daily_limit) to configure the daily cap; [`get_daily_limit`](#get_daily_limit) to read the configured cap; [`pay_per_use`](#pay_per_use) which increments this counter on each call.
 
 **CLI example**
 
@@ -2002,35 +2164,9 @@ soroban contract invoke \
 
 ### `get_trial_end`
 
-Returns the trial end timestamp if the user is in a trial period.
-
-```
-get_trial_end(env: Env, user: Address) -> Option<u64>
-```
-
-**Parameters**
-
-| Name | Type | Description |
-| --- | --- | --- |
-| `user` | `Address` | The subscriber address to query. |
-
-**Auth:** None.
-
-**Returns:** `Option<u64>` — Unix timestamp when trial ends, or `None` if no trial or no subscription.
-
-**CLI example**
-
-```bash
-soroban contract invoke \
-  --id <CONTRACT_ID> \
-  --network testnet \
-  -- get_trial_end \
-  --user <USER_ADDRESS>
-```
+See the [full reference entry above](#get_trial_end).
 
 ---
-
-### `add_merchant`
 
 Adds a merchant to the whitelist. Only the contract admin can call this.
 
@@ -2214,7 +2350,7 @@ soroban contract invoke \
 
 ### `get_schema_version`
 
-Returns the current storage schema version.
+Read-only view. Returns the current storage schema version of the contract.
 
 ```
 get_schema_version(env: Env) -> u32
@@ -2222,7 +2358,20 @@ get_schema_version(env: Env) -> u32
 
 **Auth:** None.
 
-**Returns:** `u32` — defaults to `1` before the first `migrate()` call.
+**Returns:** `u32` — the schema version stored in instance storage. **Default: `1`** when `DataKey::SchemaVersion` has never been written (i.e. before the first `migrate()` call or on freshly deployed contracts).
+
+**What schema versions mean:**
+
+| Version | Description |
+| --- | --- |
+| `1` | Initial schema. `Subscription` struct does not include the `paused` field. |
+| `2` | Current schema. `Subscription` includes `paused: bool`. Set by `migrate()`. |
+
+**When to call this:** Use `get_schema_version` to verify a deployment is on the current schema before running `migrate()`, and to confirm a migration completed successfully. A keeper or admin script can check this before submitting `migrate(users)` to avoid redundant transactions — `migrate()` is a no-op when already at version 2, but reading the version first avoids the gas cost entirely.
+
+**Storage read:** `DataKey::SchemaVersion` in instance storage. Falls back to `1u32` when absent.
+
+**See also:** [`migrate`](#migrate) which bumps this value from 1 → 2; the [Deployment — State Migration](./DEPLOYMENT.md#state-migration) guide for the full migration history and CLI steps.
 
 **CLI example**
 
@@ -2232,6 +2381,8 @@ soroban contract invoke \
   --network testnet \
   -- get_schema_version
 ```
+
+---
 
 ---
 
@@ -2404,7 +2555,7 @@ All intervals are in **seconds**.
 
 All events can be indexed by listening to the Stellar RPC event stream for the FlowPay contract ID.
 
-For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md).
+For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md). For consumption patterns (polling, deduplication, reaction, reliability), see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 | Event name | Topic | Data |
 | --- | --- | --- |

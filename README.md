@@ -218,3 +218,4 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 - Architecture overview: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Developer Integration Guide: [`docs/INTEGRATION-GUIDE.md`](docs/INTEGRATION-GUIDE.md)
 - Mainnet deployment checklist: [`docs/MAINNET-DEPLOYMENT.md`](docs/MAINNET-DEPLOYMENT.md)
+- Merchant Integration Cookbook: [`docs/MERCHANT-INTEGRATION.md`](docs/MERCHANT-INTEGRATION.md)

@@ -2,6 +2,8 @@
 
 This guide is designed for third-party applications (such as SaaS billing dashboards, merchants, and mobile apps) that want to integrate the PayFlow recurring billing and `pay_per_use` microtransaction protocol on the Stellar network.
 
+> **Merchants:** This document focuses on the subscriber path (approve, subscribe, charge). For accepting revenue, monitoring subscribers, handling merchant events, and withdrawing balances, see the **[Merchant Integration Cookbook](./MERCHANT-INTEGRATION.md)**.
+
 ---
 
 ## 1. Prerequisites
@@ -152,7 +154,15 @@ async function listenForCharges() {
 
 ---
 
-## 7. Error Handling
+## 7. Referral Attribution
+
+Pass an optional `referrer` Stellar address as the last argument to `subscribe` (instead of `xdr.ScVal.scvVoid()`) to record on-chain attribution. Referral **codes and links** are resolved off-chain to that address before the call. FlowPay does not pay referrers automatically — use `referred` / `charged` events plus `get_referrer` for commissions.
+
+Full architecture, payout models, link workflows, CLI examples, and TypeScript snippets: **[REFERRALS.md](./REFERRALS.md)**.
+
+---
+
+## 8. Error Handling
 
 When calling the contract, the RPC may return specific execution errors if validations fail. You must handle these gracefully in your application.
 
@@ -181,7 +191,7 @@ try {
 
 ---
 
-## 8. Paginating Charge History
+## 9. Paginating Charge History
 
 `get_charge_history_page(user, offset, limit)` reads from `ChargeHistory(user)`, a `Vec<u64>` capped at the 12 most recent charge timestamps (oldest → newest, FIFO). `limit` is silently capped at 12, and an `offset` past the end of the history returns an empty array rather than an error — there is no `ascending` flag, so "most recent first" has to be computed client-side from the returned oldest-to-newest slice.
 
@@ -209,3 +219,17 @@ async function getChargeHistoryPage(userAddress, offset, limit) {
   return sim.result.retval;
 }
 ```
+
+---
+
+## 9. Event-Driven Integrations
+
+If your app needs to react to on-chain activity (new subscriptions, successful charges, cancellations, merchant freezes) rather than only calling contract methods, do **not** invent a custom polling scheme from scratch.
+
+Use the Event-Driven Integration Cookbook:
+
+- Poll Soroban RPC `getEvents` with a durable cursor
+- Deduplicate on `tx_hash + event_name + ledger` (plus user address when scoped)
+- Choose a reaction pattern: keeper, analytics, notifications, or reconciliation
+
+Full guide: [`docs/EVENT-DRIVEN-GUIDE.md`](./EVENT-DRIVEN-GUIDE.md). Event payload schemas: [`docs/EVENTS.md`](./EVENTS.md). Reference scripts: [`scripts/watch-events.ts`](../scripts/watch-events.ts), [`scripts/replay-events.ts`](../scripts/replay-events.ts).
