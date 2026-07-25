@@ -386,3 +386,303 @@ resource "kubernetes_deployment" "keeper" {
    - Check keeper uptime during missed window
    - Manually invoke missed batch_charge pages
    - Add padding time to next scheduled run
+
+---
+
+## Dead-Letter Queue Recovery
+
+Failed `batch_charge` pages (or individual addresses) that exhaust retries should land in a dead-letter queue (DLQ) — Redis list, SQS queue, or a JSONL file — instead of being dropped.
+
+### Scenario
+
+A network blip or temporary `InsufficientAllowance` storm left dozens of pages in the DLQ. Billing is falling behind and grace windows are at risk.
+
+### Detection
+
+```bash
+# Redis-backed DLQ depth
+redis-cli LLEN keeper:dlq
+# Expected when healthy: 0 (or near-zero)
+
+# File-backed DLQ
+wc -l /var/lib/payflow/keeper-dlq.jsonl
+# Expected: 0 lines when drained
+```
+
+Alert if DLQ depth > 0 for more than one keeper interval.
+
+### Resolution steps
+
+1. **Inspect a sample entry** (do not replay blindly):
+
+```bash
+redis-cli LRANGE keeper:dlq 0 2
+# Expected: JSON objects with offset, addresses[], error, attempts, ts
+```
+
+2. **Classify errors** using [`docs/ERROR-CODES.md`](../ERROR-CODES.md):
+   - Transient (RPC timeout, 429) → safe to replay
+   - `IntervalNotElapsed` / skipped → drop from DLQ
+   - `GracePeriodElapsed` → drop; notify user / support (re-subscribe)
+   - `InsufficientAllowance` → notify user; drop or defer
+   - `ContractPaused` → **stop replay** until unpaused
+
+3. **Replay transient entries** with rate limiting:
+
+```bash
+# Example operator helper (pseudo)
+python /opt/keeper/replay_dlq.py \
+  --max-batch 20 \
+  --sleep-ms 500 \
+  --dry-run
+# Expected dry-run: lists pages that would be re-invoked
+
+python /opt/keeper/replay_dlq.py \
+  --max-batch 20 \
+  --sleep-ms 500
+# Expected: "replayed=N success=M failed=K remaining=<LLEN>"
+```
+
+4. **Manual single-page invoke** when automation is unavailable:
+
+```bash
+soroban contract invoke \
+  --id "$KEEPER_CONTRACT_ID" \
+  --source keeper \
+  --network "$NETWORK" \
+  -- batch_charge \
+  --users '["GUSER1...", "GUSER2..."]'
+# Expected: Vec of ChargeResult values; no panic for per-user skips
+```
+
+5. **Ack / delete** successfully replayed DLQ entries; leave permanent failures in a `keeper:dlq:archive` list for audit.
+
+### Verification
+
+```bash
+redis-cli LLEN keeper:dlq
+# Expected: 0
+
+journalctl -u payflow-keeper -n 50 --no-pager
+# Expected: recent "Cycle complete" without DLQ growth
+```
+
+Cross-ref: [`docs/KEEPER.md`](../KEEPER.md#handling-failed-charges), [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md).
+
+---
+
+## Multi-Instance Keeper Coordination
+
+### Scenario
+
+You run 2–3 keeper replicas for HA. Without coordination, two leaders can submit overlapping `batch_charge` calls for the same addresses in the same ledger window (wasted fees; noisy logs). The contract still enforces intervals (so double **successful** charges in one interval should fail closed), but operators must avoid thrashing.
+
+### Detection
+
+```bash
+redis-cli GET keeper:leader
+# Expected: a single keeper id, e.g. keeper-2
+
+# If multiple hosts claim leadership in logs:
+grep -h "acquired leadership\|Starting batch_charge cycle" /var/log/keeper-*.log | tail -20
+```
+
+Alert when two different `KEEPER_ID` values log an active cycle within the same minute.
+
+### Resolution steps
+
+1. **Use a single distributed lock** (Redis `SET NX EX`) — only the leader runs charge cycles:
+
+```bash
+redis-cli SET keeper:leader "$KEEPER_ID" EX 300 NX
+# Expected on success: OK
+# Expected if another leader holds the lock: (nil)
+```
+
+2. **Renew the lease** at least every `LEASE_TTL / 2` seconds while working.
+
+3. **Optional shard mode** (advanced): partition by page offset ranges, still with a per-shard lock:
+
+```text
+keeper-a → offsets 0..N/2
+keeper-b → offsets N/2..N
+lock keys: keeper:lock:shard:0 , keeper:lock:shard:1
+```
+
+4. **Fence tokens**: include `leader_epoch` from Redis `INCR keeper:leader_epoch` in logs; ignore late work from stale epochs after failover.
+
+5. **Never share the same keeper secret across untrusted hosts** without a secrets manager; rotate if a replica is compromised.
+
+### Verification
+
+```bash
+redis-cli GET keeper:leader
+# Expected: exactly one live id
+
+# Simulate failover
+redis-cli DEL keeper:leader
+# Within LEASE_TTL, a follower should acquire and log leadership
+journalctl -u payflow-keeper -f
+# Expected: "acquired leadership" on one replica only
+```
+
+Cross-ref: [`docs/KEEPER.md`](../KEEPER.md#high-availability-with-leader-election-production).
+
+---
+
+## RPC Failover Configuration
+
+### Scenario
+
+Primary Soroban RPC returns elevated latency or 5xx errors; charge cycles stall.
+
+### Detection
+
+```bash
+curl -s -o /dev/null -w "%{http_code} time=%{time_total}\n" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' \
+  "$KEEPER_RPC_URL"
+# Expected healthy: HTTP 200 and time well under your warning threshold
+```
+
+Track p95 invoke latency and error rate; fail over when error rate > 5% for 5 minutes or p95 > 30s.
+
+### Resolution steps
+
+1. **Configure primary + backups** via env:
+
+```bash
+# /etc/payflow/keeper.env
+KEEPER_RPC_URL=https://soroban-mainnet.example.com
+KEEPER_RPC_URL_FALLBACKS=https://soroban-mainnet-backup.example.com,https://soroban-rpc.stellar.org
+KEEPER_RPC_HEALTH_PATH=getHealth
+KEEPER_RPC_FAILOVER_ERROR_THRESHOLD=0.05
+KEEPER_RPC_FAILOVER_LATENCY_MS=30000
+```
+
+2. **Health-probe loop** (keeper-side):
+
+```python
+def pick_rpc(endpoints):
+    for url in endpoints:
+        try:
+            if health_ok(url) and latency_ms(url) < 30000:
+                return url
+        except Exception as e:
+            logger.warning("rpc unhealthy %s: %s", url, e)
+    raise RuntimeError("all RPC endpoints unhealthy")
+```
+
+3. **On failover**, log clearly and alert:
+
+```text
+ALERT rpc_failover from=primary to=backup-1 reason=p95_latency
+```
+
+4. **Fail back** only after primary stays healthy for one full charge interval.
+
+5. **Keep network passphrase aligned** with the endpoint (Testnet vs Mainnet) — mismatched RPC/passphrase looks like “RPC failure” but is misconfiguration. See [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md).
+
+### Verification
+
+```bash
+# Force probe
+curl -s -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' \
+  "$KEEPER_RPC_URL_FALLBACKS"
+# Expected: JSON health response without transport error
+
+journalctl -u payflow-keeper -n 100 | grep -i rpc
+# Expected: stable endpoint or a single clean failover event
+```
+
+Cross-ref: [`docs/KEEPER.md`](../KEEPER.md#monitoring-and-alerting).
+
+---
+
+## Incident Response Playbook
+
+Use this when billing is impaired, funds may be at risk, or the contract must be paused.
+
+### Severity & who to alert
+
+| Severity | Examples | Alert |
+| --- | --- | --- |
+| SEV-1 | Unexpected drains, admin key suspected compromise, uncontrolled charges | Page on-call **and** protocol admin; security@payflow.dev |
+| SEV-2 | Contract paused unexpectedly, keeper down > 1 interval, RPC total outage | Page on-call; notify merchants if charges delay |
+| SEV-3 | DLQ buildup, elevated skip rates, single-region RPC degrade | Ticket + Slack; fix in business hours |
+
+### What to check (first 15 minutes)
+
+1. **Contract pause / health**
+
+```bash
+soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- health_check
+# Expected: healthy when operating normally
+```
+
+2. **Keeper process & balance**
+
+```bash
+systemctl status payflow-keeper --no-pager
+stellar keys address keeper
+# Check XLM balance via account info; top up if < 10 XLM
+```
+
+3. **Error codes in logs** — map via [`docs/ERROR-CODES.md`](../ERROR-CODES.md) (`ContractPaused` 18 / `ContractPausedError` 30 → stop retries).
+
+4. **RPC health** — run failover probes above.
+
+5. **Leadership** — confirm a single leader (`redis-cli GET keeper:leader`).
+
+### How to pause the contract during an incident
+
+Only the **admin** (hardware wallet / multisig) should pause:
+
+```bash
+soroban contract invoke \
+  --id "$KEEPER_CONTRACT_ID" \
+  --source admin \
+  --network "$NETWORK" \
+  -- pause_contract
+# Expected: success; subsequent charge/subscribe fail with pause errors
+```
+
+Then stop keepers to avoid log spam:
+
+```bash
+systemctl stop payflow-keeper
+# Expected: inactive (dead)
+```
+
+### Recovery / unpause
+
+1. Root-cause fixed and verified on Testnet if applicable.  
+2. Admin unpauses:
+
+```bash
+soroban contract invoke \
+  --id "$KEEPER_CONTRACT_ID" \
+  --source admin \
+  --network "$NETWORK" \
+  -- unpause_contract
+# Expected: success
+```
+
+3. Start keepers; drain DLQ with the recovery procedure.  
+4. Post-incident: timeline, customer impact, follow-ups (see also [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md) rollback notes).
+
+### Verification
+
+```bash
+systemctl start payflow-keeper
+systemctl is-active payflow-keeper
+# Expected: active
+
+soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- health_check
+# Expected: healthy
+
+redis-cli LLEN keeper:dlq
+# Expected: trending to 0 after replay
+```
