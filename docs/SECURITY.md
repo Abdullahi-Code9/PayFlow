@@ -134,6 +134,8 @@ The contract includes an upgrade wrapper, which means upgrade governance matters
 - There is no fully decentralized dispute-resolution layer for failed or delayed charges.
 - Admin powers are broad and should be treated as high trust until governance is tightened.
 
+For merchant finance teams assembling billing records for accounting or regulatory review, see [COMPLIANCE.md](./COMPLIANCE.md) (audit trail generation, on-chain vs ephemeral data, retention, and explicit non-goals such as KYC and tax calculation).
+
 ---
 
 ## Responsible Disclosure
