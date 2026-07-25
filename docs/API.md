@@ -1100,6 +1100,23 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_daily_spent --user <USER_ADDRESS>
 ```
 
+### `get_day_start`
+
+```
+get_day_start(env: Env, user: Address) -> bool
+```
+
+Auth: none.
+
+Returns: `bool` — `true` if `DataKey::DayStart(user)` exists (current ~24h spend window is active), `false` otherwise. This is a presence marker, not a wall-clock timestamp.
+
+CLI example:
+*See also: [Daily Spending Limits Deep-Dive](./DAILY-LIMITS.md).*
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_day_start --user <USER_ADDRESS>
+```
+
 ### `get_referrer`
 
 ```

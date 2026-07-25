@@ -1227,6 +1227,14 @@ impl FlowPay {
         spending_limit::get_daily_spent(&env, &user)
     }
 
+    /// Returns `true` if the caller's current daily spend window is active.
+    ///
+    /// Reflects whether `DataKey::DayStart(user)` exists in temporary storage.
+    /// This is a presence check, not a timestamp.
+    pub fn get_day_start(env: Env, user: Address) -> bool {
+        spending_limit::get_day_start(&env, &user)
+    }
+
     // ─────────────────────────────────────────────
     // Referral tracking
     // ─────────────────────────────────────────────────────────────

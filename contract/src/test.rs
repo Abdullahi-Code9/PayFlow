@@ -2337,6 +2337,38 @@ fn test_daily_limit_visibility_and_spend_tracking() {
 }
 
 #[test]
+fn test_get_day_start_visibility() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    // No window before any spend
+    assert!(!client.get_day_start(&user));
+    assert_eq!(client.get_daily_spent(&user), 0);
+
+    client.set_daily_limit(&user, &10_0000000);
+    // Setting a limit alone does not open the day window
+    assert!(!client.get_day_start(&user));
+
+    client.pay_per_use(&user, &2_0000000);
+    assert!(client.get_day_start(&user));
+    assert_eq!(client.get_daily_spent(&user), 2_0000000);
+
+    client.remove_daily_limit(&user);
+    assert!(!client.get_day_start(&user));
+    assert_eq!(client.get_daily_spent(&user), 0);
+}
+
+#[test]
 fn test_daily_limit_set_event_emitted() {
     let (env, contract_id, _token_addr, user, _merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
