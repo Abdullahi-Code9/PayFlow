@@ -63,9 +63,9 @@ Source: `contract/src/spending_limit.rs`, `DataKey::DailySpent(user)`.
 ## E
 
 ### Events
-The contract emits structured events for key lifecycle operations and state transitions. Off-chain services (indexers, dashboards) rely on these events for analytics and for driving keeper workflows. See `docs/EVENTS.md` for the canonical schema.
+The contract emits structured events for key lifecycle operations and state transitions. Off-chain services (indexers, dashboards) rely on these events for analytics and for driving keeper workflows. See `docs/EVENTS.md` for the canonical schema, and `docs/EVENT-DRIVEN-GUIDE.md` for polling, deduplication, reaction patterns, and reliability.
 
-Source: `contract/src/events.rs`, `docs/EVENTS.md`.
+Source: `contract/src/events.rs`, `docs/EVENTS.md`, `docs/EVENT-DRIVEN-GUIDE.md`.
 
 ## F
 

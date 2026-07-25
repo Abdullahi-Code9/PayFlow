@@ -1516,7 +1516,7 @@ All amounts are in stroops. 1 XLM = 10,000,000 stroops. Intervals are
 
 ## Events Reference
 
-See [EVENTS.md](./EVENTS.md) for the complete event schema reference.
+See [EVENTS.md](./EVENTS.md) for the complete event schema reference. For building keepers, analytics, notifications, or reconciliation jobs on top of those events, see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 **Parameters**
 
@@ -2404,7 +2404,7 @@ All intervals are in **seconds**.
 
 All events can be indexed by listening to the Stellar RPC event stream for the FlowPay contract ID.
 
-For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md).
+For a complete reference of all events with detailed schemas and examples, see [EVENTS.md](./EVENTS.md). For consumption patterns (polling, deduplication, reaction, reliability), see [EVENT-DRIVEN-GUIDE.md](./EVENT-DRIVEN-GUIDE.md).
 
 | Event name | Topic | Data |
 | --- | --- | --- |
