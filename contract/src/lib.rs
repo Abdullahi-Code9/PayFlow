@@ -97,6 +97,11 @@ pub enum DataKey {
     PendingUpgrade,
     // Feature: pause expiry (bounded pause with auto-resume)
     PauseExpiry(Address),
+    // Feature: configurable global hourly volume cap override
+    GlobalVolumeCapOverride,
+    // Feature: configurable min/max fee bps bounds
+    MinFeeBps,
+    MaxFeeBps,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1511,6 +1516,32 @@ impl FlowPay {
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable global hourly volume cap
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns the currently effective global hourly volume cap (stroops).
+    /// Falls back to the compile-time `GLOBAL_MAX_VOLUME_PER_HOUR` default
+    /// when no operator override has been configured.
+    pub fn get_global_volume_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::GlobalVolumeCapOverride)
+            .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR)
+    }
+
+    /// Admin-only: overrides the global hourly volume cap without requiring
+    /// a contract upgrade. `new_cap` must be strictly positive.
+    pub fn set_global_volume_cap(env: Env, new_cap: i128) {
+        admin::require_admin(&env);
+        if new_cap <= 0 {
+            env.panic_with_error(ContractError::InvalidVolumeCap);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalVolumeCapOverride, &new_cap);
     }
 }
 
