@@ -3,10 +3,20 @@
  * Usage: npx tsx scripts/export-merchant-report.ts --merchant GXXXX... --output report.json
  */
 
-import { Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
+import {
+  Contract,
+  Networks,
+  TransactionBuilder,
+  BASE_FEE,
+  nativeToScVal,
+  Address,
+  xdr,
+} from "@stellar/stellar-sdk";
 
-const RPC_URL = process.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE = process.env.VITE_NETWORK_PASSPHRASE ?? Networks.TESTNET;
+const RPC_URL =
+  process.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
+const NETWORK_PASSPHRASE =
+  process.env.VITE_NETWORK_PASSPHRASE ?? Networks.TESTNET;
 const CONTRACT_ID = process.env.VITE_CONTRACT_ID ?? "";
 
 function addressVal(addr: string): xdr.ScVal {
@@ -44,7 +54,10 @@ async function getMerchantSubscriberCount(merchant: string): Promise<number> {
     limit: 1000,
   });
 
-  const latestSubscribeByUser = new Map<string, { merchant: string; timestamp: number }>();
+  const latestSubscribeByUser = new Map<
+    string,
+    { merchant: string; timestamp: number }
+  >();
   const latestCancelByUser = new Map<string, number>();
 
   for (const event of response.events) {
@@ -54,7 +67,7 @@ async function getMerchantSubscriberCount(merchant: string): Promise<number> {
     const userAddress = topic[1]?.toString();
     if (!userAddress) continue;
 
-    const eventTime = (event.ledgerCloseTime as number) || 0;
+    const eventTime = Date.parse(event.ledgerClosedAt) || 0;
 
     if (eventType === "subscribed") {
       const merchantVal = (event as any).value?._value?.merchant;
@@ -62,7 +75,10 @@ async function getMerchantSubscriberCount(merchant: string): Promise<number> {
       if (!subscribedMerchant) continue;
       const existing = latestSubscribeByUser.get(userAddress);
       if (!existing || eventTime > existing.timestamp) {
-        latestSubscribeByUser.set(userAddress, { merchant: subscribedMerchant, timestamp: eventTime });
+        latestSubscribeByUser.set(userAddress, {
+          merchant: subscribedMerchant,
+          timestamp: eventTime,
+        });
       }
     } else if (eventType === "cancelled") {
       const existing = latestCancelByUser.get(userAddress) || 0;
@@ -84,7 +100,10 @@ async function getMerchantSubscriberCount(merchant: string): Promise<number> {
   return count;
 }
 
-async function getMerchantRevenueHistory(merchant: string, days: number): Promise<bigint[]> {
+async function getMerchantRevenueHistory(
+  merchant: string,
+  days: number,
+): Promise<bigint[]> {
   const { Server } = await import("@stellar/stellar-sdk/rpc");
   const server = new Server(RPC_URL);
   const contract = new Contract(CONTRACT_ID);
@@ -95,7 +114,11 @@ async function getMerchantRevenueHistory(merchant: string, days: number): Promis
     networkPassphrase: NETWORK_PASSPHRASE,
   })
     .addOperation(
-      contract.call("get_merchant_revenue_history", addressVal(merchant), nativeToScVal(days, { type: "u32" }))
+      contract.call(
+        "get_merchant_revenue_history",
+        addressVal(merchant),
+        nativeToScVal(days, { type: "u32" }),
+      ),
     )
     .setTimeout(30)
     .build();
@@ -123,7 +146,9 @@ async function main() {
   }
 
   if (!merchant || !output) {
-    console.error("Usage: npx tsx scripts/export-merchant-report.ts --merchant GXXXX... --output report.json");
+    console.error(
+      "Usage: npx tsx scripts/export-merchant-report.ts --merchant GXXXX... --output report.json",
+    );
     process.exit(1);
   }
 

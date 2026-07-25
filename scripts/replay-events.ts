@@ -21,8 +21,12 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-const CONTRACT_ID = process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
-const RPC_URL = process.env.RPC_URL || process.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID =
+  process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
+const RPC_URL =
+  process.env.RPC_URL ||
+  process.env.VITE_RPC_URL ||
+  "https://soroban-testnet.stellar.org";
 
 /**
  * Number of ledgers to fetch per batch. Keeps RPC responses manageable
@@ -56,7 +60,9 @@ function parseArgs(argv: string[]): ReplayArgs {
         break;
       default:
         console.error(`Unknown argument: ${argv[i]}`);
-        console.error("Usage: replay-events.ts --from-ledger <n> --to-ledger <n>");
+        console.error(
+          "Usage: replay-events.ts --from-ledger <n> --to-ledger <n>",
+        );
         process.exit(1);
     }
   }
@@ -108,7 +114,14 @@ function parseEvent(rawEvent: any): ReplayEvent {
     : new Date().toISOString();
   const txHash = rawEvent.txHash ?? rawEvent.id ?? "";
 
-  return { eventName, address, data: rawEvent.value, ledger, timestamp, txHash };
+  return {
+    eventName,
+    address,
+    data: rawEvent.value,
+    ledger,
+    timestamp,
+    txHash,
+  };
 }
 
 /**
@@ -143,7 +156,7 @@ async function upsertEvent(event: ReplayEvent): Promise<void> {
 async function fetchBatch(
   server: Server,
   startLedger: number,
-  endLedger: number
+  endLedger: number,
 ): Promise<ReplayEvent[]> {
   const events: ReplayEvent[] = [];
   let cursor: string | undefined;
@@ -205,7 +218,11 @@ async function main(): Promise<void> {
   let batchCount = 0;
 
   // Process in batches to handle large ledger ranges incrementally
-  for (let batchStart = fromLedger; batchStart <= toLedger; batchStart += BATCH_SIZE) {
+  for (
+    let batchStart = fromLedger;
+    batchStart <= toLedger;
+    batchStart += BATCH_SIZE
+  ) {
     const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, toLedger);
     batchCount++;
 
@@ -222,15 +239,19 @@ async function main(): Promise<void> {
       // Progress reporting
       const progress = Math.min(
         100,
-        Math.round(((batchEnd - fromLedger + 1) / (toLedger - fromLedger + 1)) * 100)
+        Math.round(
+          ((batchEnd - fromLedger + 1) / (toLedger - fromLedger + 1)) * 100,
+        ),
       );
       console.log(
         `  Batch ${batchCount}: ledgers ${batchStart}–${batchEnd} | ` +
-        `${events.length} events | ${progress}% complete`
+          `${events.length} events | ${progress}% complete`,
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`ERROR processing batch ${batchCount} (ledgers ${batchStart}–${batchEnd}): ${message}`);
+      console.error(
+        `ERROR processing batch ${batchCount} (ledgers ${batchStart}–${batchEnd}): ${message}`,
+      );
       process.exit(1);
     }
   }
