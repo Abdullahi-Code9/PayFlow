@@ -10,6 +10,7 @@ import DailyLimitCard from "./DailyLimitCard";
 import DailyLimitModal from "./DailyLimitModal";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import AllowanceDisplay from "./AllowanceDisplay";
+import ReferralPanel from "./ReferralPanel";
 import ToastContainer from "./Toast";
 import { useSubscription } from "../hooks/useSubscription";
 import { usePolling } from "../hooks/usePolling";
@@ -168,6 +169,7 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce }:
               {ppuPending && (
                 <p className="status-text status-text--pending">Confirming payment…</p>
               )}
+              <ReferralPanel publicKey={userKey} />
             </>
           )}
         </>
