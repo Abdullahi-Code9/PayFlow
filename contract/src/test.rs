@@ -3080,7 +3080,7 @@ fn test_get_charge_history_page_offset_limit() {
     client.charge(&user);
     let t3 = env.ledger().timestamp();
 
-    let page = client.get_charge_history_page(&user, &1u32, &2u32);
+    let page = client.get_charge_history_page(&user, &1u32, &2u32, &true);
     assert_eq!(page.len(), 2);
     assert_eq!(page.get(0).unwrap(), t2);
     assert_eq!(page.get(1).unwrap(), t3);
@@ -3167,7 +3167,7 @@ fn test_get_charge_history_page_limit_capped_at_12() {
         client.charge(&user);
     }
 
-    let page = client.get_charge_history_page(&user, &0u32, &100u32);
+    let page = client.get_charge_history_page(&user, &0u32, &100u32, &true);
     assert_eq!(page.len(), 12);
 }
 
@@ -3192,8 +3192,130 @@ fn test_get_charge_history_page_offset_beyond_length() {
     });
     client.charge(&user);
 
-    let page = client.get_charge_history_page(&user, &5u32, &2u32);
+    let page = client.get_charge_history_page(&user, &5u32, &2u32, &true);
     assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_charge_history_sort_ascending_and_descending() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let interval: u64 = 86400;
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let mut timestamps = Vec::new(&env);
+    for _ in 0..5 {
+        env.ledger().with_mut(|l| {
+            l.timestamp += interval + 1;
+        });
+        client.charge(&user);
+        timestamps.push_back(env.ledger().timestamp());
+    }
+
+    let t0 = timestamps.get(0).unwrap();
+    let t1 = timestamps.get(1).unwrap();
+    let t2 = timestamps.get(2).unwrap();
+    let t3 = timestamps.get(3).unwrap();
+    let t4 = timestamps.get(4).unwrap();
+
+    // Ascending (true) full page: [t0, t1, t2, t3, t4]
+    let asc_all = client.get_charge_history_page(&user, &0u32, &10u32, &true);
+    assert_eq!(asc_all.len(), 5);
+    assert_eq!(asc_all.get(0).unwrap(), t0);
+    assert_eq!(asc_all.get(1).unwrap(), t1);
+    assert_eq!(asc_all.get(2).unwrap(), t2);
+    assert_eq!(asc_all.get(3).unwrap(), t3);
+    assert_eq!(asc_all.get(4).unwrap(), t4);
+
+    // Descending (false) full page: [t4, t3, t2, t1, t0]
+    let desc_all = client.get_charge_history_page(&user, &0u32, &10u32, &false);
+    assert_eq!(desc_all.len(), 5);
+    assert_eq!(desc_all.get(0).unwrap(), t4);
+    assert_eq!(desc_all.get(1).unwrap(), t3);
+    assert_eq!(desc_all.get(2).unwrap(), t2);
+    assert_eq!(desc_all.get(3).unwrap(), t1);
+    assert_eq!(desc_all.get(4).unwrap(), t0);
+
+    // Pagination in ascending direction:
+    let asc_p1 = client.get_charge_history_page(&user, &0u32, &2u32, &true);
+    assert_eq!(asc_p1.len(), 2);
+    assert_eq!(asc_p1.get(0).unwrap(), t0);
+    assert_eq!(asc_p1.get(1).unwrap(), t1);
+
+    let asc_p2 = client.get_charge_history_page(&user, &2u32, &2u32, &true);
+    assert_eq!(asc_p2.len(), 2);
+    assert_eq!(asc_p2.get(0).unwrap(), t2);
+    assert_eq!(asc_p2.get(1).unwrap(), t3);
+
+    let asc_p3 = client.get_charge_history_page(&user, &4u32, &2u32, &true);
+    assert_eq!(asc_p3.len(), 1);
+    assert_eq!(asc_p3.get(0).unwrap(), t4);
+
+    let asc_p4 = client.get_charge_history_page(&user, &5u32, &2u32, &true);
+    assert_eq!(asc_p4.len(), 0);
+
+    // Pagination in descending direction:
+    let desc_p1 = client.get_charge_history_page(&user, &0u32, &2u32, &false);
+    assert_eq!(desc_p1.len(), 2);
+    assert_eq!(desc_p1.get(0).unwrap(), t4);
+    assert_eq!(desc_p1.get(1).unwrap(), t3);
+
+    let desc_p2 = client.get_charge_history_page(&user, &2u32, &2u32, &false);
+    assert_eq!(desc_p2.len(), 2);
+    assert_eq!(desc_p2.get(0).unwrap(), t2);
+    assert_eq!(desc_p2.get(1).unwrap(), t1);
+
+    let desc_p3 = client.get_charge_history_page(&user, &4u32, &2u32, &false);
+    assert_eq!(desc_p3.len(), 1);
+    assert_eq!(desc_p3.get(0).unwrap(), t0);
+
+    let desc_p4 = client.get_charge_history_page(&user, &5u32, &2u32, &false);
+    assert_eq!(desc_p4.len(), 0);
+}
+
+#[test]
+fn test_charge_history_sort_edge_cases() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    // Empty history
+    assert_eq!(client.get_charge_history_page(&random, &0u32, &10u32, &true).len(), 0);
+    assert_eq!(client.get_charge_history_page(&random, &0u32, &10u32, &false).len(), 0);
+    assert_eq!(client.get_charge_history_page(&random, &5u32, &10u32, &false).len(), 0);
+
+    // Single entry
+    let interval: u64 = 86400;
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    client.charge(&user);
+    let t0 = env.ledger().timestamp();
+
+    let asc_single = client.get_charge_history_page(&user, &0u32, &10u32, &true);
+    let desc_single = client.get_charge_history_page(&user, &0u32, &10u32, &false);
+    assert_eq!(asc_single.len(), 1);
+    assert_eq!(desc_single.len(), 1);
+    assert_eq!(asc_single.get(0).unwrap(), t0);
+    assert_eq!(desc_single.get(0).unwrap(), t0);
 }
 
 #[test]

@@ -1531,7 +1531,7 @@ soroban contract invoke --id <CONTRACT_ID> --source <USER_KEY> --network testnet
 ### `get_charge_history_page`
 
 ```
-get_charge_history_page(env: Env, user: Address, offset: u32, limit: u32) -> Vec<u64>
+get_charge_history_page(env: Env, user: Address, offset: u32, limit: u32, ascending: bool) -> Vec<u64>
 ```
 
 Auth: none.
@@ -1541,25 +1541,26 @@ Returns: `Vec<u64>`.
 CLI example:
 
 ```bash
-soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_charge_history_page --user <USER_ADDRESS> --offset 0 --limit 12
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_charge_history_page --user <USER_ADDRESS> --offset 0 --limit 12 --ascending false
 ```
 
 #### Pagination Guide
 
-`ChargeHistory(user)` is a `Vec<u64>` of up to 12 charge timestamps, stored **oldest → newest**. Every successful `charge()` appends a timestamp; once the vector holds 12 entries, the next append drops entry `0` (the oldest) before pushing the new one. In other words, storage itself is the ring buffer — `get_charge_history_page` just slices whatever is currently in it. There is no separate "total charge count" stored anywhere; the longest history you can ever page through is 12 entries, because older charges are physically gone.
+`ChargeHistory(user)` is a `Vec<u64>` of up to 12 charge timestamps, stored **oldest → newest**. Every successful `charge()` appends a timestamp; once the vector holds 12 entries, the next append drops entry `0` (the oldest) before pushing the new one. In other words, storage itself is the ring buffer — `get_charge_history_page` slices whatever is currently in it (in ascending or descending order). There is no separate "total charge count" stored anywhere; the longest history you can ever page through is 12 entries, because older charges are physically gone.
 
 **Slicing algorithm (from [`subscription_history.rs`](../contract/src/subscription_history.rs)):**
 
 ```rust
+ordered_history = if ascending { history } else { history.reversed() }
 effective_limit = min(limit, 12)
-if offset >= history.len() { return [] }          // empty, not an error
-end = min(offset + effective_limit, history.len())
-return history[offset..end]                        // oldest → newest
+if offset >= ordered_history.len() { return [] }   // empty, not an error
+end = min(offset + effective_limit, ordered_history.len())
+return ordered_history[offset..end]
 ```
 
 `limit` is silently capped at 12 — passing `limit: 100` is safe and simply returns everything available. `offset` is never validated against the history length beyond the empty-result check above; there is no `IndexOutOfBounds`-style error anywhere in this path.
 
-> **No `ascending` parameter.** The current contract signature is `get_charge_history_page(user, offset, limit)` — there is no direction flag. Results are always returned oldest-first. To read the **most recent** N charges, compute `offset` yourself from the total history length (see Example 2).
+> **`ascending` parameter.** Passing `ascending = true` returns records in oldest-to-newest order. Passing `ascending = false` returns records in newest-to-oldest order (most recent first).
 
 **Ring buffer diagram** — a subscriber with 14 total lifetime charges (`c1`..`c14`). Only the last 12 survive:
 

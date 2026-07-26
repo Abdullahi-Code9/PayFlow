@@ -1409,9 +1409,15 @@ impl FlowPay {
     }
 
     /// Returns a paginated slice of charge timestamps for a subscriber.
-    /// limit is capped at 12.
-    pub fn get_charge_history_page(env: Env, user: Address, offset: u32, limit: u32) -> Vec<u64> {
-        subscription_history::get_charge_history_page(&env, &user, offset, limit)
+    /// limit is capped at 12. If `ascending` is false, records are returned in descending order (newest first).
+    pub fn get_charge_history_page(
+        env: Env,
+        user: Address,
+        offset: u32,
+        limit: u32,
+        ascending: bool,
+    ) -> Vec<u64> {
+        subscription_history::get_charge_history_page(&env, &user, offset, limit, ascending)
     }
 
     /// Transfers subscription ownership from `user` to `new_user`.
