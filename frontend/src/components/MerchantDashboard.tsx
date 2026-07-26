@@ -12,6 +12,7 @@ import { formatAddress, formatXlm } from "../utils/format";
 import { usePolling } from "../hooks/usePolling";
 import { useTransaction } from "../hooks/useTransaction";
 import { useVirtualList } from "../hooks/useVirtualList";
+import { useResponsive } from "../hooks/useResponsive";
 import CopyButton from "./CopyButton";
 import RevenueSparkline from "./RevenueSparkline";
 
@@ -37,6 +38,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
   const [error, setError] = useState<string | null>(null);
 
   const tx = useTransaction();
+  const { isMobile } = useResponsive();
   const [outcomes, setOutcomes] = useState<Record<string, BatchChargeOutcome>>({});
 
   const dueSubscribers = subscribers.filter((s) => s.nextChargeAt <= Math.floor(Date.now() / 1000));
@@ -111,7 +113,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
   }
 
   return (
-    <div className="dashboard">
+    <div className={`dashboard${isMobile ? " dashboard--mobile" : ""}`}>
       <div className="flex-between mb-4">
         <div>
           <h2 className="text-xl font-bold">Merchant Dashboard</h2>
@@ -124,7 +126,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className={`merchant-stats-grid grid gap-4 mb-6${isMobile ? " grid-cols-1" : " grid-cols-2"}`}>
         <div className="card">
           <span className="text-sm text-muted block mb-1">Total Revenue</span>
           <span className="text-2xl font-bold">{formatXlm(revenue)}</span>
@@ -214,7 +216,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
                     </div>
                     <div className="merchant-subscriber-value">
                       <span className="subscription-row__value">{formatXlm(entry.amount)}</span>
-                      <div className="flex flex-col items-end gap-1">
+                      <div className="merchant-subscriber-meta-right">
                         <span className="subscription-row__label">
                           Next charge {formatNextCharge(entry.nextChargeAt)}
                         </span>

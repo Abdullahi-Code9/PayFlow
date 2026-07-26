@@ -540,6 +540,27 @@ input::placeholder {
   z-index: 100;
 }
 
+/* Inline modal (used in SubscriptionCard) */
+.modal {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  max-width: 400px;
+  width: 100%;
+}
+
+.modal h3 {
+  font-size: var(--text-lg);
+  font-weight: var(--font-bold);
+  margin-bottom: var(--space-3);
+}
+
+.modal p {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
 .modal-card {
   max-width: 400px;
   width: 100%;
@@ -658,6 +679,13 @@ input::placeholder {
   min-width: 180px;
 }
 
+.merchant-subscriber-meta-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Subscription Card Styles
    ───────────────────────────────────────────────────────────────────────────── */
@@ -687,6 +715,12 @@ input::placeholder {
   flex-direction: column;
   gap: var(--space-4);
   margin-bottom: var(--space-6);
+}
+
+.subscription-card__actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .allowance-card__row {
@@ -725,6 +759,23 @@ input::placeholder {
   width: 100%;
 }
 
+/* Mobile modifier classes applied via useResponsive */
+.subscription-row--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.dashboard--mobile {
+  gap: var(--space-3);
+}
+
+.dashboard--mobile .flex-between {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Screen Reader Only Utility (Issue #169)
    ───────────────────────────────────────────────────────────────────────────── */
@@ -739,6 +790,125 @@ input::placeholder {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tab Bar
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-2);
+}
+
+.tab-button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  /* WCAG 2.5.5: minimum 44×44px touch target */
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-button:hover {
+  background: var(--color-surface-overlay);
+  color: var(--color-text);
+}
+
+.tab-button--active {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-weight: var(--font-semibold);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Form Primitives (used by SubscribeForm and others)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form-label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--color-text-muted);
+}
+
+.text-error {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Subscribe Form
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.subscribe-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.subscribe-form__title {
+  font-size: var(--text-xl);
+  font-weight: var(--font-bold);
+  color: var(--color-text);
+}
+
+.subscribe-form__submit {
+  width: 100%;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dashboard wrapper
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Grid utilities (replacing Tailwind-style classes)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-cols-1 {
+  grid-template-columns: 1fr;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.items-end {
+  align-items: flex-end;
+}
+
+.flex-col {
+  flex-direction: column;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -766,6 +936,136 @@ input::placeholder {
   font-size: var(--text-xl);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Responsive: max-width 768px
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Dashboard: single-column layout */
+  .dashboard {
+    gap: var(--space-3);
+  }
+
+  /* Merchant dashboard header row stacks vertically */
+  .dashboard .flex-between {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  /* Merchant stats grid collapses to single column */
+  .merchant-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Merchant subscriber row: stack address and value */
+  .merchant-subscriber-row {
+    height: auto;
+    min-height: 72px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3) 0;
+  }
+
+  .merchant-subscriber-value {
+    text-align: left;
+    min-width: 0;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* Subscription card rows stack label above value */
+  .subscription-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .subscription-row__value {
+    font-size: var(--text-sm);
+  }
+
+  /* Subscription card actions: full-width buttons */
+  .subscription-card__actions {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .subscription-card__actions .btn-secondary,
+  .subscription-card__actions .btn-danger,
+  .subscription-card__actions .btn-primary,
+  .pause-btn,
+  .resume-btn,
+  .cancel-btn {
+    width: 100%;
+  }
+
+  /* Tab bar: distribute evenly */
+  .tab-bar {
+    gap: 0;
+  }
+
+  .tab-button {
+    flex: 1;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-2);
+    font-size: var(--text-sm);
+  }
+
+  /* Subscribe form: full-width */
+  .subscribe-form .form-group,
+  .subscribe-form input,
+  .subscribe-form select {
+    width: 100%;
+  }
+
+  /* Allowance card row stacks vertically */
+  .allowance-card__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .allowance-card__row .btn-secondary {
+    width: 100%;
+  }
+
+  /* Modal: full-screen on mobile */
+  .modal-overlay .modal,
+  .modal-overlay .card.modal-card {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .modal-overlay {
+    align-items: flex-end;
+  }
+
+  /* Modal actions: stack on mobile */
+  .modal-actions {
+    flex-direction: column-reverse;
+    gap: var(--space-2);
+  }
+
+  .modal-actions button {
+    width: 100%;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Responsive: max-width 639px (narrow mobile)
+   ───────────────────────────────────────────────────────────────────────────── */
+
 @media (max-width: 639px) {
   .app-shell {
     padding: var(--space-3);
@@ -784,6 +1084,48 @@ input::placeholder {
   .card.wallet-bar {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Responsive: max-width 480px (very narrow / 320px safe zone)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  /* Prevent any horizontal overflow at 320px */
+  .app-shell {
+    padding: var(--space-2);
+  }
+
+  .card {
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+  }
+
+  .subscription-card__title {
+    font-size: var(--text-lg);
+  }
+
+  /* Merchant subscriber value: stack fully on very small screens */
+  .merchant-subscriber-value {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  /* Tab labels truncation-safe */
+  .tab-button {
+    font-size: var(--text-xs);
+    padding: var(--space-2) var(--space-1);
+  }
+
+  /* Address mono text won't overflow */
+  .merchant-row__address,
+  .wallet-bar__address {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

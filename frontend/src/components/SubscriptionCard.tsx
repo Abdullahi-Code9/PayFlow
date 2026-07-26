@@ -6,6 +6,7 @@ import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
+import { useResponsive } from "../hooks/useResponsive";
 import { buildCancelTx } from "../stellar";
 
 interface SubscriptionCardProps {
@@ -50,6 +51,7 @@ export default function SubscriptionCard({
   onCancelled,
 }: SubscriptionCardProps & { userKey: string }) {
   const { mutate } = useSubscriptionSync(userKey);
+  const { isMobile } = useResponsive();
   const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
   const nextChargeTimestamp = last_charged + interval;
   const xlm = (Number(amount) / STROOPS_PER_XLM).toFixed(2);
@@ -131,7 +133,7 @@ export default function SubscriptionCard({
   }
 
   return (
-    <div className="card">
+    <div className={`card${isMobile ? " card--mobile" : ""}`}>
       <div className="subscription-card__header">
         <div>
           <h2 className="subscription-card__title">Your Subscription</h2>
@@ -142,8 +144,8 @@ export default function SubscriptionCard({
         </span>
       </div>
 
-      <div className="subscription-rows">
-        <div className="subscription-row">
+      <div className={`subscription-rows${isMobile ? " subscription-rows--mobile" : ""}`}>
+        <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
           <span className="subscription-row__label">Merchant</span>
           <div className="merchant-row">
             <span className="merchant-row__address">
@@ -152,9 +154,9 @@ export default function SubscriptionCard({
             <CopyButton text={merchant} ariaLabel="Copy merchant address" />
           </div>
         </div>
-        <Row label="Amount" value={`${xlm} XLM`} />
-        <Row label="Interval" value={formatInterval(interval)} />
-        <div className="subscription-row">
+        <StackedRow label="Amount" value={`${xlm} XLM`} isMobile={isMobile} />
+        <StackedRow label="Interval" value={formatInterval(interval)} isMobile={isMobile} />
+        <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
           <span className="subscription-row__label">Next charge</span>
           <span className="subscription-row__value">
             {active && !paused ? (
@@ -256,9 +258,9 @@ export default function SubscriptionCard({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function StackedRow({ label, value, isMobile }: { label: string; value: string; isMobile: boolean }) {
   return (
-    <div className="subscription-row">
+    <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
       <span className="subscription-row__label">{label}</span>
       <span className="subscription-row__value">{value}</span>
     </div>
