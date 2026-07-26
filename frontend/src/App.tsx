@@ -32,6 +32,7 @@ import WalletBar from "./components/WalletBar";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SubscriptionCardSkeleton from "./components/Skeleton";
 import ShortcutHelpOverlay from "./components/ShortcutHelpOverlay";
+import RpcSettings from "./components/RpcSettings";
 
 // Lazy-loaded components — split into separate chunks to keep the main bundle lean.
 // MerchantDashboard gets a dedicated Vite chunk name for easier bundle analysis.
@@ -155,6 +156,7 @@ export default function App() {
   );
   const [refresh, setRefresh] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  const [showRpcSettings, setShowRpcSettings] = useState(false);
   const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
   const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
@@ -267,9 +269,20 @@ export default function App() {
             {rpcCircuitOpen
               ? `RPC circuit open — all requests blocked: ${rpcError}`
               : `RPC endpoint unreachable: ${rpcError}`}
+            {" "}
+            <button
+              className="btn-secondary"
+              style={{ marginLeft: "8px", fontSize: "12px", padding: "2px 10px" }}
+              onClick={() => setShowRpcSettings(true)}
+              data-testid="rpc-failure-banner-change-btn"
+              aria-label="Try a different RPC endpoint"
+            >
+              Try a different endpoint
+            </button>
           </span>
         </div>
       )}
+      {showRpcSettings && <RpcSettings onClose={() => setShowRpcSettings(false)} />}
       {publicKey && !networkMatch && (
         <div className="network-warning" role="alert">
           <span>⚠️</span>
