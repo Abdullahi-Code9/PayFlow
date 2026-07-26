@@ -1,3 +1,5 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { StrKey } from "@stellar/stellar-sdk";
 import React, { useMemo, useState, useEffect } from "react";
 import { buildSubscribeTx, DEFAULT_TOKEN } from "../stellar";
 import { friendlyError } from "../utils/errors";
@@ -6,6 +8,7 @@ import { useFormValidation } from "../hooks/useFormValidation";
 import { useDebounce } from "../hooks/useDebounce";
 import { useToast } from "../hooks/useToast";
 import { useTransaction } from "../hooks/useTransaction";
+import { getReferrerFromSearch } from "./ReferralPanel";
 import BalanceDisplay from "./BalanceDisplay";
 import AllowanceDisplay from "./AllowanceDisplay";
 import ToastContainer from "./Toast";
@@ -30,6 +33,34 @@ export default function SubscribeForm({
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
+  const [referrer, setReferrer] = useState("");
+  const [referrerError, setReferrerError] = useState<string | null>(null);
+  const { errors, validate } = useFormValidation();
+  const { toasts, addToast, removeToast } = useToast();
+  const tx = useTransaction();
+
+  // Pre-fill referrer from ?ref= URL query param (Issue #661)
+  useEffect(() => {
+    const refParam = getReferrerFromSearch(window.location.search);
+    if (!refParam) return;
+
+    // Warn if the ref param equals the connected user (self-referral)
+    if (refParam === userKey) {
+      setReferrerError("Self-referral is not allowed — the contract will ignore it.");
+      return;
+    }
+
+    // Validate it looks like a Stellar address before pre-filling
+    if (StrKey.isValidEd25519PublicKey(refParam)) {
+      setReferrer(refParam);
+    }
+  }, [userKey]);
+
+  function validateReferrer(value: string): string | null {
+    if (!value) return null; // optional field
+    if (value === userKey) return "Self-referral is not allowed.";
+    if (!StrKey.isValidEd25519PublicKey(value)) {
+      return "Invalid Stellar address format";
   const [showAddressBook, setShowAddressBook] = useState(false);
   const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
   const { toasts, addToast, removeToast } = useToast();
@@ -52,20 +83,33 @@ export default function SubscribeForm({
     }
   }, [debouncedMerchant, validateAsync]);
 
+  function handleReferrerChange(value: string) {
+    setReferrer(value);
+    setReferrerError(validateReferrer(value));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const isValidAsync = await validateAsync({ merchant, amount, interval });
     if (!isValidAsync) return;
 
+    const refErr = validateReferrer(referrer);
+    if (refErr) {
+      setReferrerError(refErr);
+      return;
+    }
+
     announce("Transaction submitted");
     const hash = await tx.submit(async () => {
       const stroops = BigInt(Math.round(parseFloat(amount) * STROOPS_PER_XLM));
+      const refAddr = referrer && StrKey.isValidEd25519PublicKey(referrer) ? referrer : null;
       const xdr = await buildSubscribeTx(
         userKey,
         merchant,
         stroops,
         BigInt(interval),
         DEFAULT_TOKEN,
+        refAddr,
         null,
         ""
       );
@@ -152,6 +196,37 @@ export default function SubscribeForm({
       <IntervalSelector value={interval} onChange={setInterval} />
       {errors.interval && <span className="text-error">{errors.interval}</span>}
 
+      {/* Referrer field — pre-filled from ?ref= URL param (Issue #661) */}
+      <label className="form-group">
+        <span className="form-label">
+          Referrer address{" "}
+          <span className="text-muted" style={{ fontWeight: "normal" }}>
+            (optional)
+          </span>
+        </span>
+        <input
+          placeholder="G… (optional)"
+          value={referrer}
+          onChange={(e) => handleReferrerChange(e.target.value)}
+          aria-label="Referrer Stellar address (optional)"
+          aria-describedby={referrerError ? "referrer-error" : undefined}
+          aria-invalid={!!referrerError}
+          data-testid="referrer-input"
+        />
+        {referrerError && (
+          <span
+            id="referrer-error"
+            className="text-error"
+            role="alert"
+            data-testid="referrer-error"
+          >
+            {referrerError}
+          </span>
+        )}
+      </label>
+
+      <button type="submit" disabled={pending} className="btn-primary subscribe-form__submit">
+        {pending ? "Confirming…" : "Subscribe"}
       <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit">
         {pending ? "Confirming…" : validating ? "Validating…" : "Subscribe"}
       </button>

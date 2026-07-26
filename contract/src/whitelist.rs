@@ -1,4 +1,5 @@
 use crate::events;
+use crate::merchant_stats;
 use crate::DataKey;
 use soroban_sdk::{Address, Env};
 
@@ -14,6 +15,7 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
+    merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);
 }
 
@@ -25,12 +27,17 @@ pub fn remove_merchant(env: &Env, merchant: &Address) {
     events::publish_merchant_removed(env, merchant);
 }
 
-/// Checks if the merchant whitelist is currently enabled.
+/// Checks if the merchant whitelist is currently enabled. Defaults to true.
 pub fn is_whitelist_enabled(env: &Env) -> bool {
     env.storage()
         .instance()
         .get(&DataKey::WhitelistEnabled)
-        .unwrap_or(false)
+        .unwrap_or(true)
+}
+
+/// Returns whether the merchant whitelist is currently enabled. Defaults to true.
+pub fn get_whitelist_enabled(env: &Env) -> bool {
+    is_whitelist_enabled(env)
 }
 
 /// Enables or disables the merchant whitelist.
@@ -52,6 +59,7 @@ pub fn freeze(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .set(&DataKey::MerchantFrozen(merchant.clone()), &true);
+    merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_frozen(env, merchant);
 }
 

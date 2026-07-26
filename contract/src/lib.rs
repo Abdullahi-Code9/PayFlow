@@ -85,6 +85,10 @@ pub enum DataKey {
     SubscriberIndexSize,
     // Feature: per-merchant subscriber count
     MerchantSubCount(Address),
+    // Feature: merchant index for governance/ranking
+    MerchantIndex(u32),
+    MerchantIndexSize,
+    MerchantKnown(Address),
     // Pending admin for two-step transfer
     PendingAdmin,
     // Two-step auth for protocol fee
@@ -947,7 +951,6 @@ impl FlowPay {
         assert!(seconds > 0, "min interval must be positive");
         admin::require_admin(&env);
         min_interval::set_min_interval(&env, seconds);
-        events::publish_min_interval_updated(&env, seconds);
     }
 
     /// Returns the minimum allowed subscription interval in seconds.
@@ -1015,6 +1018,11 @@ impl FlowPay {
         whitelist::set_whitelist_enabled(&env, enabled);
     }
 
+    /// Returns whether the merchant whitelist is currently enabled. Defaults to true.
+    pub fn get_whitelist_enabled(env: Env) -> bool {
+        whitelist::get_whitelist_enabled(&env)
+    }
+
     /// Returns whether the merchant whitelist is currently enabled.
     pub fn is_whitelist_enabled(env: Env) -> bool {
         whitelist::is_whitelist_enabled(&env)
@@ -1023,6 +1031,12 @@ impl FlowPay {
     /// Returns whether a merchant is whitelisted.
     pub fn is_merchant_whitelisted(env: Env, merchant: Address) -> bool {
         whitelist::is_whitelisted(&env, &merchant)
+    }
+
+    /// Returns top N merchants ranked by subscriber count in descending order.
+    /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
+    pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
+        merchant_stats::get_top_merchants_by_subs(&env, limit)
     }
 
     /// Sets a custom fee recipient for a merchant. The caller must be the merchant.
@@ -1458,9 +1472,15 @@ impl FlowPay {
     }
 
     /// Returns a paginated slice of charge timestamps for a subscriber.
-    /// limit is capped at 12.
-    pub fn get_charge_history_page(env: Env, user: Address, offset: u32, limit: u32) -> Vec<u64> {
-        subscription_history::get_charge_history_page(&env, &user, offset, limit)
+    /// limit is capped at 12. If `ascending` is false, records are returned in descending order (newest first).
+    pub fn get_charge_history_page(
+        env: Env,
+        user: Address,
+        offset: u32,
+        limit: u32,
+        ascending: bool,
+    ) -> Vec<u64> {
+        subscription_history::get_charge_history_page(&env, &user, offset, limit, ascending)
     }
 
     /// Transfers subscription ownership from `user` to `new_user`.
