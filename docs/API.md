@@ -855,6 +855,22 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --source <ADMIN_KEY> --network testnet -- set_whitelist_enabled --enabled true
 ```
 
+### `get_whitelist_enabled`
+
+```
+get_whitelist_enabled(env: Env) -> bool
+```
+
+Auth: none.
+
+Returns: `bool` (`true` by default if not set).
+
+CLI example:
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_whitelist_enabled
+```
+
 ### `is_whitelist_enabled`
 
 ```
@@ -863,7 +879,7 @@ is_whitelist_enabled(env: Env) -> bool
 
 Auth: none.
 
-Returns: `bool`.
+Returns: `bool` (`true` by default if not set).
 
 CLI example:
 

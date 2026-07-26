@@ -953,6 +953,11 @@ impl FlowPay {
         whitelist::set_whitelist_enabled(&env, enabled);
     }
 
+    /// Returns whether the merchant whitelist is currently enabled. Defaults to true.
+    pub fn get_whitelist_enabled(env: Env) -> bool {
+        whitelist::get_whitelist_enabled(&env)
+    }
+
     /// Returns whether the merchant whitelist is currently enabled.
     pub fn is_whitelist_enabled(env: Env) -> bool {
         whitelist::is_whitelist_enabled(&env)

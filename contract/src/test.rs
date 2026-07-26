@@ -27,6 +27,10 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let token = TokenClient::new(&env, &token_addr);
     token.approve(&user, &contract_id, &10_000_0000000, &200000);
 
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
+
     (env, contract_id, token_addr, user, merchant)
 }
 
@@ -546,6 +550,38 @@ fn test_set_whitelist_enabled_false_allows_any_merchant() {
 
     let sub = client.get_subscription(&user).unwrap();
     assert_eq!(sub.merchant, merchant);
+}
+
+#[test]
+fn test_get_whitelist_enabled_defaults_to_true() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, FlowPay);
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    assert!(client.get_whitelist_enabled());
+}
+
+#[test]
+fn test_get_whitelist_enabled_toggles() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, FlowPay);
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    // Default is true
+    assert!(client.get_whitelist_enabled());
+
+    // False after set_whitelist_enabled(false)
+    client.set_whitelist_enabled(&false);
+    assert!(!client.get_whitelist_enabled());
+
+    // True after re-enabling
+    client.set_whitelist_enabled(&true);
+    assert!(client.get_whitelist_enabled());
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -25,12 +25,17 @@ pub fn remove_merchant(env: &Env, merchant: &Address) {
     events::publish_merchant_removed(env, merchant);
 }
 
-/// Checks if the merchant whitelist is currently enabled.
+/// Checks if the merchant whitelist is currently enabled. Defaults to true.
 pub fn is_whitelist_enabled(env: &Env) -> bool {
     env.storage()
         .instance()
         .get(&DataKey::WhitelistEnabled)
-        .unwrap_or(false)
+        .unwrap_or(true)
+}
+
+/// Returns whether the merchant whitelist is currently enabled. Defaults to true.
+pub fn get_whitelist_enabled(env: &Env) -> bool {
+    is_whitelist_enabled(env)
 }
 
 /// Enables or disables the merchant whitelist.
