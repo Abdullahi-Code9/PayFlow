@@ -1,17 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { getMerchantSubscribers, type MerchantSubscriber } from "../stellar";
-import { formatAddress, formatXlm } from "../utils/format";
+import { formatAddress } from "../utils/format";
 import { usePolling } from "../hooks/usePolling";
-import CopyButton from "./CopyButton";
+import MerchantSubscriberTable from "./MerchantSubscriberTable";
 
 interface Props {
   merchantKey: string;
   refreshTrigger: number;
-}
-
-function formatNextCharge(nextChargeAt: number): string {
-  const date = new Date(nextChargeAt * 1000);
-  return date.toLocaleString();
 }
 
 export default function MerchantDashboard({
@@ -27,7 +22,6 @@ export default function MerchantDashboard({
       if (prev.length === 0) setLoading(true);
       return prev;
     });
-    setSubscribers((prev) => { if (prev.length === 0) setLoading(true); return prev; });
     setError(null);
 
     try {
@@ -60,7 +54,7 @@ export default function MerchantDashboard({
         <div>
           <h2 className="text-xl font-bold">Merchant Subscribers</h2>
           <p className="text-sm text-muted">
-            Active subscribers paying your merchant wallet.
+            Subscribers paying {formatAddress(merchantKey)}.
           </p>
         </div>
         <button className="btn-secondary" onClick={refresh}>
@@ -74,42 +68,14 @@ export default function MerchantDashboard({
         </p>
       )}
 
-      {subscribers.length === 0 ? (
-        <div className="card">
-          <p className="no-sub-text">
-            No active subscribers found for {formatAddress(merchantKey)}.
+      <div className="card">
+        {subscribers.length > 0 && (
+          <p className="text-sm text-muted mb-4">
+            {subscribers.length} subscriber{subscribers.length !== 1 ? "s" : ""} found
           </p>
-        </div>
-      ) : (
-        <div className="card merchant-subscriber-card">
-          <div className="merchant-subscriber-meta mb-4">
-            <span className="text-sm text-muted">
-              {subscribers.length} active subscriber{subscribers.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-
-          <div className="subscription-rows merchant-subscriber-list">
-            {subscribers.map((entry) => (
-              <div className="subscription-row merchant-subscriber-row" key={entry.subscriber}>
-                <div className="merchant-row">
-                  <span className="merchant-row__address">
-                    {formatAddress(entry.subscriber)}
-                  </span>
-                  <CopyButton text={entry.subscriber} />
-                </div>
-                <div className="merchant-subscriber-value">
-                  <span className="subscription-row__value">
-                    {formatXlm(entry.amount)}
-                  </span>
-                  <span className="subscription-row__label">
-                    Next charge {formatNextCharge(entry.nextChargeAt)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        )}
+        <MerchantSubscriberTable subscribers={subscribers} />
+      </div>
     </div>
   );
 }
