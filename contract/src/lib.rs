@@ -162,6 +162,20 @@ pub struct ProtocolStats {
     pub contract_paused: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContractConfig {
+    pub fee_bps: u32,
+    pub fee_collector: Option<Address>,
+    pub grace_period: u64,
+    pub min_interval: u64,
+    pub max_batch_size: u32,
+    pub global_volume_cap: i128,
+    pub whitelist_enabled: bool,
+    pub paused: bool,
+    pub schema_version: u32,
+}
+
 // ─────────────────────────────────────────────────────────────
 // Contract
 // ─────────────────────────────────────────────────────────────
@@ -212,6 +226,50 @@ impl FlowPay {
             env.panic_with_error(ContractError::InvalidBatchSize);
         }
         env.storage().instance().set(&DataKey::MaxBatchSize, &size);
+    }
+
+    pub fn get_contract_config(env: Env) -> ContractConfig {
+        ContractConfig {
+            fee_bps: fee::get_fee_bps(&env),
+            fee_collector: fee::get_fee_collector(&env),
+            grace_period: grace::get_grace_period(&env),
+            min_interval: min_interval::get_min_interval(&env),
+            max_batch_size: batch::get_max_batch_size(&env),
+            global_volume_cap: GLOBAL_MAX_VOLUME_PER_HOUR,
+            whitelist_enabled: whitelist::is_whitelist_enabled(&env),
+            paused: is_contract_paused(&env),
+            schema_version: env.storage().instance().get(&DataKey::SchemaVersion).unwrap_or(1),
+        }
+    }
+
+    pub fn get_batch_charge_estimate(env: Env, users: Vec<Address>) -> Vec<ChargeResult> {
+        if users.len() > 200 {
+            env.panic_with_error(ContractError::BatchTooLarge);
+        }
+        let mut results: Vec<ChargeResult> = Vec::new(&env);
+        let now = env.ledger().timestamp();
+        let grace_period = grace::get_grace_period(&env);
+
+        for user in users.iter() {
+            let key = DataKey::Subscription(user.clone());
+            let sub_opt: Option<Subscription> = env.storage().persistent().get(&key);
+
+            let result = match sub_opt {
+                None => ChargeResult::NoSubscription,
+                Some(mut sub) => {
+                    if sub.paused && charge_exec::try_auto_resume(&env, &user, &mut sub, now) {
+                        ChargeResult::Charged
+                    } else {
+                        match charge_exec::precheck_charge(&sub, now, grace_period) {
+                            Err(skip) => skip,
+                            Ok(()) => ChargeResult::Charged,
+                        }
+                    }
+                }
+            };
+            results.push_back(result);
+        }
+        results
     }
 
     /// Creates or replaces a recurring subscription for `user`.
@@ -438,6 +496,10 @@ impl FlowPay {
     /// emits `pay_per_use` with `recipient` in place of `sub.merchant`.
     pub fn pay_per_use_to(env: Env, user: Address, amount: i128, recipient: Address) {
         pay_per_use_inner(&env, user, amount, Some(recipient));
+    }
+
+    pub fn get_day_start(env: Env, user: Address) -> Option<u64> {
+        spending_limit::get_day_start(&env, &user)
     }
 
     /// Cancels `user`'s active subscription.
@@ -823,6 +885,8 @@ impl FlowPay {
         ensure_contract_not_paused(&env);
         admin::require_admin(&env);
 
+        validation::require_valid_amount(&env, new_amount);
+
         let key = DataKey::Subscription(user.clone());
 
         let mut sub: Subscription = env
@@ -830,8 +894,6 @@ impl FlowPay {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
-
-        validation::require_valid_amount(&env, new_amount);
 
         let old_amount = sub.amount;
         sub.amount = new_amount;
@@ -1238,14 +1300,6 @@ impl FlowPay {
     /// Returns the amount spent so far today via `pay_per_use()` for the caller.
     pub fn get_daily_spent(env: Env, user: Address) -> i128 {
         spending_limit::get_daily_spent(&env, &user)
-    }
-
-    /// Returns `true` if the caller's current daily spend window is active.
-    ///
-    /// Reflects whether `DataKey::DayStart(user)` exists in temporary storage.
-    /// This is a presence check, not a timestamp.
-    pub fn get_day_start(env: Env, user: Address) -> bool {
-        spending_limit::get_day_start(&env, &user)
     }
 
     // ─────────────────────────────────────────────

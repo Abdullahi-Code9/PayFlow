@@ -49,15 +49,14 @@ pub fn get_daily_spent(env: &Env, user: &Address) -> i128 {
         .unwrap_or(0i128)
 }
 
-/// Returns `true` if the user's current day window is active (`DayStart` present).
+/// Returns the start timestamp of the user's current day window, or `None` if inactive.
 ///
-/// `DayStart` is a presence marker (unit value), not a wall-clock timestamp.
 /// When it expires from temporary storage (~17,280 ledgers after first spend),
 /// spend tracking resets on the next `pay_per_use` / `pay_per_use_to`.
-pub fn get_day_start(env: &Env, user: &Address) -> bool {
+pub fn get_day_start(env: &Env, user: &Address) -> Option<u64> {
     env.storage()
         .temporary()
-        .has(&DataKey::DayStart(user.clone()))
+        .get(&DataKey::DayStart(user.clone()))
 }
 
 /// Records `amount` as spent today for the user.
@@ -68,8 +67,10 @@ pub fn record_spend(env: &Env, user: &Address, amount: i128) {
     let spent = get_daily_spent(env, user);
     
     if !env.storage().temporary().has(&day_start_key) {
-        env.storage().temporary().set(&day_start_key, &());
+        let now = env.ledger().timestamp();
+        env.storage().temporary().set(&day_start_key, &now);
         env.storage().temporary().extend_ttl(&day_start_key, LEDGERS_PER_DAY, LEDGERS_PER_DAY);
+        crate::events::publish_daily_window_started(env, user);
     }
     
     env.storage().temporary().set(&spent_key, &(spent + amount));
