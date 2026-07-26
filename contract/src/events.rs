@@ -106,6 +106,24 @@ pub fn publish_cancelled_with_refund(env: &Env, user: &Address, refund_amount: i
     );
 }
 
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinIntervalSetEventData {
+    pub old: u64,
+    pub new: u64,
+}
+
+pub fn publish_min_interval_set(env: &Env, old: u64, new: u64) {
+    env.events().publish(
+        (Symbol::new(env, "min_interval_set"),),
+        MinIntervalSetEventData { old, new },
+    );
+}
+
+pub fn emit_min_interval_set(env: &Env, old: u64, new: u64) {
+    publish_min_interval_set(env, old, new);
+}
+
 pub fn publish_min_interval_updated(env: &Env, seconds: u64) {
     env.events()
         .publish((Symbol::new(env, "min_interval"),), seconds);

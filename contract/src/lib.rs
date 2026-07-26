@@ -885,7 +885,6 @@ impl FlowPay {
         assert!(seconds > 0, "min interval must be positive");
         admin::require_admin(&env);
         min_interval::set_min_interval(&env, seconds);
-        events::publish_min_interval_updated(&env, seconds);
     }
 
     /// Returns the minimum allowed subscription interval in seconds.

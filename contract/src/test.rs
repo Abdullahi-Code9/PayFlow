@@ -4081,6 +4081,55 @@ fn test_get_min_interval_default() {
     assert_eq!(client.get_min_interval(), 3600);
 }
 
+#[test]
+fn test_min_interval_event_emitted_on_set() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_initial_admin(&admin);
+
+    // Verify default value is 3600 before setting
+    assert_eq!(client.get_min_interval(), 3600);
+
+    // First set: old value should be 3600 default, new value 7200
+    client.set_min_interval(&7200u64);
+    assert_eq!(client.get_min_interval(), 7200);
+
+    let events_vec = env.events().all();
+    let (_, topics, data) = events_vec.get(events_vec.len() - 1).unwrap();
+    let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_symbol, Symbol::new(&env, "min_interval_set"));
+
+    let event_data: events::MinIntervalSetEventData = data.try_into_val(&env).unwrap();
+    assert_eq!(event_data.old, 3600);
+    assert_eq!(event_data.new, 7200);
+
+    // Second set: old value 7200, new value 86400
+    client.set_min_interval(&86400u64);
+    assert_eq!(client.get_min_interval(), 86400);
+
+    let events_vec2 = env.events().all();
+    let (_, topics2, data2) = events_vec2.get(events_vec2.len() - 1).unwrap();
+    let topic_symbol2: Symbol = topics2.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_symbol2, Symbol::new(&env, "min_interval_set"));
+
+    let event_data2: events::MinIntervalSetEventData = data2.try_into_val(&env).unwrap();
+    assert_eq!(event_data2.old, 7200);
+    assert_eq!(event_data2.new, 86400);
+
+    // Same value set again: old == 86400, new == 86400
+    client.set_min_interval(&86400u64);
+    let events_vec3 = env.events().all();
+    let (_, topics3, data3) = events_vec3.get(events_vec3.len() - 1).unwrap();
+    let topic_symbol3: Symbol = topics3.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_symbol3, Symbol::new(&env, "min_interval_set"));
+
+    let event_data3: events::MinIntervalSetEventData = data3.try_into_val(&env).unwrap();
+    assert_eq!(event_data3.old, 86400);
+    assert_eq!(event_data3.new, 86400);
+}
+
 
 /// subscribe panics with IntervalTooShort when interval < default floor of 3600.
 #[test]
