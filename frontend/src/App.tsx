@@ -1,4 +1,14 @@
-import React, { useState, useRef } from "react";
+/*
+ * Chunk size note (Issue #445):
+ *   Before lazy-loading:
+ *     main chunk included MerchantDashboard (~8 KB) and SubscriptionHistory
+ *     (~7.5 KB) regardless of the active tab, delaying initial parse.
+ *   After lazy-loading:
+ *     MerchantDashboard is split into a dedicated "merchant" chunk via the
+ *     Vite chunk comment below. SubscriptionHistory is split into its own
+ *     dynamic chunk. The main entry chunk no longer contains either component.
+ */
+import React, { useState, useRef, lazy, Suspense } from "react";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
 import { useLocalStorage } from "./hooks/useLocalStorage";
@@ -10,18 +20,39 @@ import { useContractId } from "./hooks/useContractId";
 import { useRpcHealth } from "./hooks/useRpcHealth";
 import { useSubscriberCount } from "./hooks/useSubscriberCount";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useRegisterShortcuts } from "./context/ShortcutRegistry";
+import { useAnalytics } from "./hooks/useAnalytics";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
-import MerchantDashboard from "./components/MerchantDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
+import SystemHealthCard from "./components/SystemHealthCard";
 import TabBar from "./components/TabBar";
 import ConnectWallet from "./components/ConnectWallet";
 import WalletBar from "./components/WalletBar";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TxQueuePanel from "./components/TxQueuePanel";
+import SubscriptionCardSkeleton from "./components/Skeleton";
+import ShortcutHelpOverlay from "./components/ShortcutHelpOverlay";
+
+// Lazy-loaded components — split into separate chunks to keep the main bundle lean.
+// MerchantDashboard gets a dedicated Vite chunk name for easier bundle analysis.
+const MerchantDashboard = lazy(
+  () => import(/* @vite-chunk-name: "merchant" */ "./components/MerchantDashboard")
+);
 
 function SunIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="5" />
       <line x1="12" y1="1" x2="12" y2="3" />
       <line x1="12" y1="21" x2="12" y2="23" />
@@ -37,7 +68,17 @@ function SunIcon() {
 
 function MoonIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   );
@@ -45,7 +86,17 @@ function MoonIcon() {
 
 function HelpIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -75,9 +126,7 @@ function TabErrorFallback({ title, onRetry }: { title: string; onRetry: () => vo
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         <h2 className="text-xl font-semibold mb-2">{title} encountered an error</h2>
-        <p className="text-muted text-sm mb-6">
-          Try again to continue.
-        </p>
+        <p className="text-muted text-sm mb-6">Try again to continue.</p>
         <button className="btn-primary" onClick={onRetry}>
           Retry
         </button>
@@ -92,61 +141,64 @@ export default function App() {
   const { available: freighterAvailable, installUrl } = useFreighterAvailable();
   const { networkMatch, walletNetwork } = useNetworkCheck();
   const { valid: contractIdValid, error: contractIdError } = useContractId();
-  const { healthy: rpcHealthy, error: rpcError } = useRpcHealth();
+  const {
+    circuitOpen: rpcCircuitOpen,
+    status: rpcStatus,
+    latencyMs: rpcLatency,
+    error: rpcError,
+  } = useRpcHealth();
   const { isMobile } = useResponsive();
   const { announcement, announce } = useAccessibility();
   const { count: subscriberCount, loading: subscriberCountLoading } = useSubscriberCount();
-  const [tab, setTab] = useLocalStorage<"subscribe" | "dashboard" | "merchant">("flowpay_tab", "dashboard");
+  const [tab, setTab] = useLocalStorage<"subscribe" | "dashboard" | "merchant" | "admin">(
+    "flowpay_tab",
+    "dashboard"
+  );
   const [refresh, setRefresh] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
   const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const merchantErrorBoundaryRef = useRef<ErrorBoundary>(null);
+  const adminErrorBoundaryRef = useRef<ErrorBoundary>(null);
 
-  // Keyboard shortcuts
+  // Global keyboard shortcuts
+  useRegisterShortcuts([
+    {
+      key: "d",
+      description: "Switch to Dashboard",
+      action: () => setTab("dashboard"),
+    },
+    {
+      key: "s",
+      description: "Switch to Subscribe",
+      action: () => setTab("subscribe"),
+    },
+    {
+      key: "m",
+      description: "Switch to Merchant",
+      action: () => setTab("merchant"),
+    },
+    {
+      key: "a",
+      description: "Switch to Admin",
+      action: () => setTab("admin"),
+    },
+    {
+      key: "?",
+      description: "Show keyboard shortcuts",
+      action: () => setShowHelp((prev) => !prev),
+    },
+  ]);
+
   const shortcuts = useKeyboardShortcuts({
     enabled: !!publicKey,
-    shortcuts: [
-      {
-        key: "d",
-        description: "Switch to Dashboard",
-        action: () => setTab("dashboard"),
-      },
-      {
-        key: "s",
-        description: "Switch to Subscribe",
-        action: () => setTab("subscribe"),
-      },
-      {
-        key: "m",
-        description: "Switch to Merchant",
-        action: () => setTab("merchant"),
-      },
-      {
-        key: "?",
-        description: "Show keyboard shortcuts",
-        action: () => setShowHelp((prev) => !prev),
-      },
-      {
-        key: "x",
-        description: "Cancel active subscription",
-        action: () => {
-          // This shortcut is handled specifically in Dashboard.tsx
-          // where it has access to the subscription state.
-          // We include it here solely for documentation in the Help Modal.
-        },
-      },
-      {
-        key: "p",
-        description: "Focus pay-per-use amount input",
-        action: () => {
-          // This shortcut is handled specifically in Dashboard.tsx
-          // where it has access to the subscription state and input ref.
-          // We include it here solely for documentation in the Help Modal.
-        },
-      },
-    ],
   });
+
+  async function handleConnectWallet() {
+    await connect();
+    track({ type: "wallet_connected" });
+  }
 
   return (
     <div className={`app-shell${isMobile ? " app-shell--mobile" : ""}`}>
@@ -179,7 +231,11 @@ export default function App() {
               <HelpIcon />
             </button>
           )}
-          <button className="btn-secondary theme-toggle" onClick={toggle} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+          <button
+            className="btn-secondary theme-toggle"
+            onClick={toggle}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
             {theme === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
@@ -187,65 +243,7 @@ export default function App() {
 
       {/* Keyboard shortcuts help */}
       {showHelp && publicKey && (
-        <div className="modal-overlay" onClick={() => setShowHelp(false)}>
-          <div className="modal-card card" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Keyboard Shortcuts</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {shortcuts.map((shortcut) => (
-                <div
-                  key={shortcut.key}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: "16px",
-                  }}
-                >
-                  <span>{shortcut.description}</span>
-                  <kbd
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "4px",
-                      backgroundColor: "var(--color-bg-secondary)",
-                      border: "1px solid var(--color-border)",
-                      fontFamily: "monospace",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {shortcut.key}
-                  </kbd>
-                </div>
-              ))}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "16px",
-                }}
-              >
-                <span>Close modals</span>
-                <kbd
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    backgroundColor: "var(--color-bg-secondary)",
-                    border: "1px solid var(--color-border)",
-                    fontFamily: "monospace",
-                    fontSize: "14px",
-                  }}
-                >
-                  Esc
-                </kbd>
-              </div>
-            </div>
-            <div style={{ marginTop: "16px", textAlign: "right" }}>
-              <button className="btn-secondary" onClick={() => setShowHelp(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <ShortcutHelpOverlay shortcuts={shortcuts} onClose={() => setShowHelp(false)} />
       )}
 
       {/* Contract ID error */}
@@ -257,18 +255,28 @@ export default function App() {
       )}
 
       {/* RPC health warning */}
-      {!rpcHealthy && rpcError && (
-        <div className="network-warning" role="alert">
+      {rpcStatus === "degraded" && (
+        <div className="network-warning network-warning--degraded" role="alert">
           <span>⚠️</span>
-          <span>RPC endpoint unreachable: {rpcError}</span>
+          <span>RPC connection degraded: Latency is high ({rpcLatency}ms)</span>
+        </div>
+      )}
+      {rpcStatus === "unreachable" && rpcError && (
+        <div className="network-warning" role="alert">
+          <span>{rpcCircuitOpen ? "🔴" : "⚠️"}</span>
+          <span>
+            {rpcCircuitOpen
+              ? `RPC circuit open — all requests blocked: ${rpcError}`
+              : `RPC endpoint unreachable: ${rpcError}`}
+          </span>
         </div>
       )}
       {publicKey && !networkMatch && (
         <div className="network-warning" role="alert">
           <span>⚠️</span>
           <span>
-            Wallet is on <strong>{walletNetwork}</strong> — app expects a
-            different network. Switch networks in Freighter to continue.
+            Wallet is on <strong>{walletNetwork}</strong> — app expects a different network. Switch
+            networks in Freighter to continue.
           </span>
         </div>
       )}
@@ -276,9 +284,7 @@ export default function App() {
       {/* Freighter not installed — show install prompt */}
       {!freighterAvailable && !publicKey && (
         <div className="card connect-wallet">
-          <p className="connect-wallet__hint">
-            Freighter wallet is required to use FlowPay.
-          </p>
+          <p className="connect-wallet__hint">Freighter wallet is required to use FlowPay.</p>
           <a
             href={installUrl}
             target="_blank"
@@ -292,7 +298,30 @@ export default function App() {
 
       {/* Freighter installed but not connected */}
       {freighterAvailable && !publicKey && (
-        <ConnectWallet onConnect={connect} error={error} loading={connecting} />
+        <>
+          <div className="card connect-wallet">
+            <p className="connect-wallet__hint">
+              Help improve FlowPay with optional anonymous usage analytics.
+            </p>
+            <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+              <button
+                className={`btn-secondary${analyticsEnabled ? " active" : ""}`}
+                onClick={() => setAnalyticsOptIn(true)}
+                type="button"
+              >
+                Opt in
+              </button>
+              <button
+                className={`btn-secondary${!analyticsEnabled ? " active" : ""}`}
+                onClick={() => setAnalyticsOptIn(false)}
+                type="button"
+              >
+                Keep disabled
+              </button>
+            </div>
+          </div>
+          <ConnectWallet onConnect={handleConnectWallet} error={error} loading={connecting} />
+        </>
       )}
 
       {/* Connected */}
@@ -302,7 +331,7 @@ export default function App() {
 
           {/* Tabs */}
           <TabBar
-            tabs={["dashboard", "subscribe", "merchant"]}
+            tabs={["dashboard", "subscribe", "merchant", "admin"]}
             activeTab={tab}
             onTabChange={setTab}
           />
@@ -322,6 +351,7 @@ export default function App() {
                 <SubscribeForm
                   userKey={publicKey}
                   onSign={signAndSubmit}
+                  onSubscribed={() => track({ type: "subscription_created" })}
                   onSuccess={() => {
                     setTab("dashboard");
                     setRefresh((r) => r + 1);
@@ -339,10 +369,28 @@ export default function App() {
                   />
                 }
               >
-                <MerchantDashboard
-                  merchantKey={publicKey}
-                  refreshTrigger={refresh}
-                />
+                <Suspense fallback={<SubscriptionCardSkeleton />}>
+                  <MerchantDashboard
+                    merchantKey={publicKey}
+                    onSign={signAndSubmit}
+                    refreshTrigger={refresh}
+                  />
+                </Suspense>
+              </ErrorBoundary>
+            ) : tab === "admin" ? (
+              <ErrorBoundary
+                ref={adminErrorBoundaryRef}
+                fallback={
+                  <TabErrorFallback
+                    title="Admin Dashboard"
+                    onRetry={() => adminErrorBoundaryRef.current?.reset()}
+                  />
+                }
+              >
+                <>
+                  <SystemHealthCard callerKey={publicKey} />
+                  <AdminDashboard publicKey={publicKey} onSign={signAndSubmit} />
+                </>
               </ErrorBoundary>
             ) : (
               <ErrorBoundary
@@ -359,6 +407,10 @@ export default function App() {
                   onSign={signAndSubmit}
                   refreshTrigger={refresh}
                   announce={announce}
+                  onCancelled={() => track({ type: "subscription_cancelled" })}
+                  onPayPerUse={(amount) =>
+                    track({ type: "pay_per_use", payload: { amountStroops: amount } })
+                  }
                 />
               </ErrorBoundary>
             )}

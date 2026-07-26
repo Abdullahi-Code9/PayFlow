@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::DataKey;
+use crate::{DataKey, SUBSCRIPTION_TTL_LEDGERS};
 
 /// Maximum number of charge timestamps retained per subscriber.
 const MAX_HISTORY: u32 = 12;
@@ -29,7 +29,73 @@ pub fn record_charge(env: &Env, user: &Address, timestamp: u64) {
 
     history.push_back(timestamp);
 
+    let key = DataKey::ChargeHistory(user.clone());
+    env.storage().persistent().set(&key, &history);
+    env.storage().persistent().extend_ttl(
+        &key,
+        SUBSCRIPTION_TTL_LEDGERS / 2,
+        SUBSCRIPTION_TTL_LEDGERS,
+    );
+}
+
+/// Removes the ChargeHistory entry for a subscriber entirely.
+pub fn prune_charge_history(env: &Env, user: &Address) {
     env.storage()
         .persistent()
-        .set(&DataKey::ChargeHistory(user.clone()), &history);
+        .remove(&DataKey::ChargeHistory(user.clone()));
+}
+
+/// Returns the current TTL (in ledgers) of the ChargeHistory entry, or 0 if absent.
+pub fn get_charge_history_ttl(_env: &Env, _user: &Address) -> u32 {
+    #[cfg(any(test, feature = "testutils"))]
+    {
+        use soroban_sdk::testutils::storage::Persistent;
+        let key = DataKey::ChargeHistory(_user.clone());
+        if _env.storage().persistent().has(&key) {
+            _env.storage().persistent().get_ttl(&key)
+        } else {
+            0
+        }
+    }
+    #[cfg(not(any(test, feature = "testutils")))]
+    {
+        0
+    }
+}
+
+/// Clears the stored charge history for a subscriber.
+pub fn clear_charge_history(env: &Env, user: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::ChargeHistory(user.clone()));
+}
+
+/// Returns a paginated slice of charge timestamps for a subscriber.
+/// `limit` is capped at 12.
+pub fn get_charge_history_page(env: &Env, user: &Address, offset: u32, limit: u32) -> Vec<u64> {
+    let history = get_charge_history(env, user);
+    let mut page = Vec::new(env);
+
+    let effective_limit = if limit > MAX_HISTORY {
+        MAX_HISTORY
+    } else {
+        limit
+    };
+
+    let total = history.len();
+    if offset >= total {
+        return page;
+    }
+
+    let end = if offset + effective_limit > total {
+        total
+    } else {
+        offset + effective_limit
+    };
+
+    for i in offset..end {
+        page.push_back(history.get(i).unwrap());
+    }
+
+    page
 }

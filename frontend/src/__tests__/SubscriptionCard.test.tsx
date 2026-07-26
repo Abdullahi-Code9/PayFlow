@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -36,8 +36,7 @@ vi.mock("../stellar", () => ({
 }));
 
 describe("SubscriptionCard", () => {
-  const mockOnCancel = vi.fn();
-  const mockOnPause = vi.fn();
+  const mockOnSign = vi.fn().mockResolvedValue("test-hash");
   const mockOnRefresh = vi.fn();
   const mockUserKey = "GUSER123456789";
 
@@ -101,8 +100,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -119,8 +117,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -139,8 +136,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -159,8 +155,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -179,8 +174,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -200,8 +194,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -221,8 +214,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -244,8 +236,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -261,8 +252,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription()}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -287,12 +277,16 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={subscription}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
       expect(screen.getByText("5.00 XLM")).toBeInTheDocument();
+
+      const cancelButton = screen.getByRole("button", {
+        name: /cancel subscription/i,
+      });
+      await userEvent.click(cancelButton);
     });
 
     it("renders amount with correct decimal formatting", async () => {
@@ -301,8 +295,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={subscription}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -316,8 +309,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ interval: 86400 })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -329,8 +321,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ interval: 604800 })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -342,8 +333,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ interval: 2592000 })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -357,8 +347,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: true, paused: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -372,8 +361,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: true, paused: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -388,8 +376,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -405,8 +392,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -418,8 +404,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: true, trial_duration: 0 })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -436,8 +421,7 @@ describe("SubscriptionCard", () => {
             trial_duration: 86400 * 7,
           })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -453,8 +437,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ last_charged: lastCharged, interval, active: true })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -468,8 +451,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -483,8 +465,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: true, paused: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -496,8 +477,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: true, paused: true })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );
@@ -509,8 +489,7 @@ describe("SubscriptionCard", () => {
         <SubscriptionCard
           subscription={createMockSubscription({ active: false })}
           userKey={mockUserKey}
-          onCancel={mockOnCancel}
-          onPause={mockOnPause}
+          onSign={mockOnSign}
           onRefresh={mockOnRefresh}
         />
       );

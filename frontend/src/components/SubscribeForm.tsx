@@ -1,23 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StrKey } from "@stellar/stellar-sdk";
+import React, { useMemo, useState, useEffect } from "react";
 import { buildSubscribeTx, DEFAULT_TOKEN } from "../stellar";
 import { friendlyError } from "../utils/errors";
-import { STROOPS_PER_XLM, BILLING_INTERVALS } from "../constants";
+import { STROOPS_PER_XLM, BILLING_INTERVALS } from "../constants"; // BILLING_INTERVALS used for initial value
 import { useFormValidation } from "../hooks/useFormValidation";
+import { useDebounce } from "../hooks/useDebounce";
 import { useToast } from "../hooks/useToast";
 import { useTransaction } from "../hooks/useTransaction";
 import { getReferrerFromSearch } from "./ReferralPanel";
+import BalanceDisplay from "./BalanceDisplay";
 import AllowanceDisplay from "./AllowanceDisplay";
 import ToastContainer from "./Toast";
+import IntervalSelector from "./IntervalSelector";
+import AddressBook from "./AddressBook";
 
 interface Props {
   userKey: string;
   onSign: (xdr: string) => Promise<string>;
   onSuccess: () => void;
   announce: (message: string) => void;
+  onSubscribed?: () => void;
 }
 
-export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: Props) {
+export default function SubscribeForm({
+  userKey,
+  onSign,
+  onSuccess,
+  announce,
+  onSubscribed,
+}: Props) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
@@ -49,9 +61,27 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
     if (value === userKey) return "Self-referral is not allowed.";
     if (!StrKey.isValidEd25519PublicKey(value)) {
       return "Invalid Stellar address format";
+  const [showAddressBook, setShowAddressBook] = useState(false);
+  const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
+  const { toasts, addToast, removeToast } = useToast();
+  const tx = useTransaction();
+
+  const debouncedMerchant = useDebounce(merchant, 500);
+
+  // Validate whenever any field changes
+  useEffect(() => {
+    validate({ merchant, amount, interval });
+  }, [merchant, amount, interval, validate]);
+
+  useEffect(() => {
+    if (debouncedMerchant) {
+      validateAsync({
+        merchant: debouncedMerchant,
+        amount: amount || "1",
+        interval: interval || 30,
+      });
     }
-    return null;
-  }
+  }, [debouncedMerchant, validateAsync]);
 
   function handleReferrerChange(value: string) {
     setReferrer(value);
@@ -60,7 +90,8 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!validate({ merchant, amount, interval })) return;
+    const isValidAsync = await validateAsync({ merchant, amount, interval });
+    if (!isValidAsync) return;
 
     const refErr = validateReferrer(referrer);
     if (refErr) {
@@ -79,6 +110,7 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
         BigInt(interval),
         DEFAULT_TOKEN,
         refAddr,
+        null,
         ""
       );
       return onSign(xdr);
@@ -87,6 +119,7 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
     if (hash) {
       addToast("Subscribed!", "success", hash);
       announce("Transaction confirmed");
+      onSubscribed?.();
       onSuccess();
     } else if (tx.error) {
       const msg = `Error: ${friendlyError(tx.error)}`;
@@ -102,6 +135,7 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
   }, [amount]);
 
   const pending = tx.status === "pending";
+  const disabled = pending || validating || !isValid;
 
   return (
     <form onSubmit={handleSubmit} className="subscribe-form">
@@ -116,7 +150,26 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
           required
         />
         {errors.merchant && <span className="text-error">{errors.merchant}</span>}
+        <button
+          type="button"
+          className="btn-secondary subscribe-form__address-book-btn"
+          onClick={() => setShowAddressBook(true)}
+          aria-label="Select merchant from address book"
+        >
+          📋 Select from Address Book
+        </button>
       </label>
+
+      {showAddressBook && (
+        <AddressBook
+          onSelect={(address) => {
+            setMerchant(address);
+          }}
+          onClose={() => setShowAddressBook(false)}
+        />
+      )}
+
+      <BalanceDisplay address={userKey} />
 
       <label className="form-group">
         <span className="form-label">Amount (XLM per period)</span>
@@ -139,17 +192,9 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
         )}
       </label>
 
-      <label className="form-group">
-        <span className="form-label">Billing interval</span>
-        <select value={interval} onChange={(e) => setInterval(Number(e.target.value))}>
-          {BILLING_INTERVALS.map((i) => (
-            <option key={i.value} value={i.value}>
-              {i.label}
-            </option>
-          ))}
-        </select>
-        {errors.interval && <span className="text-error">{errors.interval}</span>}
-      </label>
+      {/* #278 — Use dedicated IntervalSelector instead of inline <select> */}
+      <IntervalSelector value={interval} onChange={setInterval} />
+      {errors.interval && <span className="text-error">{errors.interval}</span>}
 
       {/* Referrer field — pre-filled from ?ref= URL param (Issue #661) */}
       <label className="form-group">
@@ -182,6 +227,8 @@ export default function SubscribeForm({ userKey, onSign, onSuccess, announce }: 
 
       <button type="submit" disabled={pending} className="btn-primary subscribe-form__submit">
         {pending ? "Confirming…" : "Subscribe"}
+      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit">
+        {pending ? "Confirming…" : validating ? "Validating…" : "Subscribe"}
       </button>
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
