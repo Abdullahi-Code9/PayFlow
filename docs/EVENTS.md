@@ -206,15 +206,24 @@ Events related to admin operations.
   }
   ```
 
-### min_interval
+### min_interval_set
 - **Trigger**: `set_min_interval()`
-- **Topic keys**: `["min_interval"]`
-- **Payload schema**: `seconds: u64`
+- **Topic keys**: `["min_interval_set"]`
+- **Payload schema**:
+  ```rust
+  {
+    old: u64,
+    new: u64
+  }
+  ```
 - **JSON example**:
   ```json
   {
-    "topic": ["min_interval"],
-    "data": 86400
+    "topic": ["min_interval_set"],
+    "data": {
+      "old": 3600,
+      "new": 86400
+    }
   }
   ```
 
