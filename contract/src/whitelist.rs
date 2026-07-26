@@ -124,7 +124,16 @@ pub fn is_frozen(env: &Env, merchant: &Address) -> bool {
 }
 
 /// Freezes a merchant, blocking new subscriptions. Idempotent.
-pub fn freeze(env: &Env, merchant: &Address) {
+pub fn freeze(env: &Env, merchant: &Address, reason: Option<soroban_sdk::String>) {
+    if let Some(r) = &reason {
+        if r.len() > 128 {
+            env.panic_with_error(crate::errors::ContractError::MetadataLabelTooLong);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::MerchantFreezeReason(merchant.clone()), r);
+    }
+    
     env.storage()
         .persistent()
         .set(&DataKey::MerchantFrozen(merchant.clone()), &true);
@@ -137,5 +146,14 @@ pub fn unfreeze(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::MerchantFrozen(merchant.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::MerchantFreezeReason(merchant.clone()));
     events::publish_merchant_unfrozen(env, merchant);
+}
+
+pub fn get_freeze_reason(env: &Env, merchant: &Address) -> Option<soroban_sdk::String> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MerchantFreezeReason(merchant.clone()))
 }
