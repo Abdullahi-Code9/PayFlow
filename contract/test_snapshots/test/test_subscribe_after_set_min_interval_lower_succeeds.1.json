@@ -1367,11 +1367,28 @@
           "v0": {
             "topics": [
               {
-                "symbol": "min_interval"
+                "symbol": "min_interval_set"
               }
             ],
             "data": {
-              "u64": 60
+              "map": [
+                {
+                  "key": {
+                    "symbol": "new"
+                  },
+                  "val": {
+                    "u64": 60
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "old"
+                  },
+                  "val": {
+                    "u64": 3600
+                  }
+                }
+              ]
             }
           }
         }
