@@ -104,6 +104,11 @@ pub enum DataKey {
     PendingUpgrade,
     // Feature: pause expiry (bounded pause with auto-resume)
     PauseExpiry(Address),
+    // Feature: configurable global hourly volume cap override
+    GlobalVolumeCapOverride,
+    // Feature: configurable min/max fee bps bounds
+    MinFeeBps,
+    MaxFeeBps,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1620,6 +1625,110 @@ impl FlowPay {
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable global hourly volume cap
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns the currently effective global hourly volume cap (stroops).
+    /// Falls back to the compile-time `GLOBAL_MAX_VOLUME_PER_HOUR` default
+    /// when no operator override has been configured.
+    pub fn get_global_volume_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::GlobalVolumeCapOverride)
+            .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR)
+    }
+
+    /// Admin-only: overrides the global hourly volume cap without requiring
+    /// a contract upgrade. `new_cap` must be strictly positive.
+    pub fn set_global_volume_cap(env: Env, new_cap: i128) {
+        admin::require_admin(&env);
+        if new_cap <= 0 {
+            env.panic_with_error(ContractError::InvalidVolumeCap);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalVolumeCapOverride, &new_cap);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable fee bounds (governance guardrails)
+    // ─────────────────────────────────────────────────────────────
+
+    /// Admin-only: configures the allowed [min_bps, max_bps] range for
+    /// future fee proposals, guarding against accidental fee misconfiguration
+    /// (e.g. an operator typo setting bps close to 10000).
+    pub fn set_fee_bounds(env: Env, min_bps: u32, max_bps: u32) {
+        admin::require_admin(&env);
+        if min_bps > max_bps || max_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidFeeBounds);
+        }
+        env.storage().instance().set(&DataKey::MinFeeBps, &min_bps);
+        env.storage().instance().set(&DataKey::MaxFeeBps, &max_bps);
+    }
+
+    /// Returns the configured (min_bps, max_bps) fee bounds, defaulting to
+    /// (0, 10000) when governance has not configured explicit bounds.
+    pub fn get_fee_bounds(env: Env) -> (u32, u32) {
+        let min_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinFeeBps)
+            .unwrap_or(0u32);
+        let max_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxFeeBps)
+            .unwrap_or(10_000u32);
+        (min_bps, max_bps)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Lightweight subscription reads
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns just the merchant address for a user's subscription, without
+    /// decoding the full `Subscription` struct. Lighter-weight than
+    /// `get_subscription` for callers that only need to know which merchant
+    /// a user subscribes to.
+    pub fn get_subscriber_merchant(env: Env, user: Address) -> Option<Address> {
+        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+        Some(sub.merchant)
+    }
+
+    /// Returns a page of subscriber addresses starting at `offset`, capped
+    /// at 50 per call, filtered to only those whose subscription is
+    /// currently active. Avoids forcing callers to over-fetch via
+    /// `get_subscriber_page` and filter client-side.
+    pub fn get_active_subscriber_page(env: Env, offset: u64, limit: u32) -> Vec<Address> {
+        let count = subscription_count::get_subscriber_index_size(&env);
+        let cap: u32 = if limit > 50 { 50 } else { limit };
+        let mut result = Vec::new(&env);
+        if offset >= count || cap == 0 {
+            return result;
+        }
+        let mut i = offset;
+        while i < count && result.len() < cap {
+            if let Some(addr) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Address>(&DataKey::SubscriberIndex(i))
+            {
+                if let Some(sub) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, Subscription>(&DataKey::Subscription(addr.clone()))
+                {
+                    if sub.active {
+                        result.push_back(addr);
+                    }
+                }
+            }
+            i += 1;
+        }
+        result
     }
 }
 
