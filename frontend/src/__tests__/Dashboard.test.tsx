@@ -10,6 +10,7 @@ vi.mock("../stellar", () => ({
   getAllowance: vi.fn(() => Promise.resolve(0n)),
   getDailyLimit: vi.fn(() => Promise.resolve(null)),
   getDailySpent: vi.fn(() => Promise.resolve(0n)),
+  fetchEvents: vi.fn(() => Promise.resolve([])),
   explorerTxUrl: vi.fn((hash: string) => `https://stellar.expert/tx/${hash}`),
   server: {
     getTransaction: vi.fn(() => Promise.resolve({ status: "SUCCESS" })),
