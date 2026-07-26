@@ -1,5 +1,6 @@
 /**
- * SubscriptionCard — displays an active subscription with allowance health indicator.
+ * SubscriptionCard — displays an active subscription with allowance health indicator
+ * and trial period badge (Issue #666).
  *
  * Allowance health tiers (Issue #659):
  *  - allowance === 0          → red   "No allowance — charges will fail"
@@ -7,7 +8,12 @@
  *  - allowance >= amount * 3  → green "Healthy"
  *  - query failed             → neutral "Unknown"
  *
- * Clicking an amber/red/unknown badge opens IncreaseAllowanceModal.
+ * Trial badge (Issue #666):
+ *  - get_trial_end returns Some(ts) and ts > now → amber "Trial ends in X days"
+ *  - get_trial_end returns None or ts <= now     → no badge, normal next-charge display
+ *  - RPC error fetching trial end                → no badge, don't crash
+ *
+ * Clicking an amber/red/unknown allowance badge opens IncreaseAllowanceModal.
  */
 import React, { useEffect, useState } from "react";
 import CopyButton from "./CopyButton";
@@ -15,7 +21,11 @@ import NextChargeCountdown from "./NextChargeCountdown";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import { Subscription } from "../types";
 import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
-import { getAllowance } from "../stellar";
+import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
+import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
+import { usePauseResume } from "../hooks/usePauseResume";
+import { useRegisterShortcuts } from "../context/ShortcutRegistry";
+import { useResponsive } from "../hooks/useResponsive";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,16 +34,6 @@ export type AllowanceHealth = "healthy" | "low" | "none" | "unknown";
 interface SubscriptionCardProps {
   subscription: Subscription;
   userKey: string;
-  onCancel: () => void;
-  onPause: (xdr: string) => Promise<string>;
-import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
-import { usePauseResume } from "../hooks/usePauseResume";
-import { useRegisterShortcuts } from "../context/ShortcutRegistry";
-import { useResponsive } from "../hooks/useResponsive";
-import { buildCancelTx } from "../stellar";
-
-interface SubscriptionCardProps {
-  subscription: Subscription;
   onSign: (xdr: string) => Promise<string>;
   onRefresh: () => void;
   onCancelled?: () => void;
@@ -49,26 +49,6 @@ function formatInterval(secs: number): string {
   if (secs >= weekly) return `${Math.round(secs / weekly)}w`;
   if (secs >= daily) return `${Math.round(secs / daily)}d`;
   return `${secs}s`;
-}
-
-function formatTrialStatus(
-  trial_duration: number,
-  last_charged: number
-): { isInTrial: boolean; trialEndDate: string; trialDaysRemaining: number } {
-  if (trial_duration === 0) {
-    return { isInTrial: false, trialEndDate: "", trialDaysRemaining: 0 };
-  }
-  const trialEndTimestamp = last_charged + trial_duration;
-  const now = Math.floor(Date.now() / 1000);
-  const isInTrial = now < trialEndTimestamp;
-  const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
-  const trialDaysRemaining = Math.max(
-    0,
-    Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60))
-  );
-  const trialDaysRemaining = Math.max(0, Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60)));
-
-  return { isInTrial, trialEndDate, trialDaysRemaining };
 }
 
 /**
@@ -141,37 +121,106 @@ function AllowanceHealthBadge({ health, loading, onClick }: AllowanceHealthBadge
       aria-label={`${label}. Click to increase allowance.`}
       data-testid={`allowance-badge-${health}`}
     >
-      {health === "none" ? "⚠ No allowance — charges will fail" : health === "low" ? "⚠ Allowance too low" : "? Allowance unknown"}
+      {health === "none"
+        ? "⚠ No allowance — charges will fail"
+        : health === "low"
+        ? "⚠ Allowance too low"
+        : "? Allowance unknown"}
     </button>
   );
 }
 
+// ── TrialBadge ────────────────────────────────────────────────────────────────
+
+interface TrialBadgeProps {
+  /** Unix timestamp (seconds) when the trial ends, or null if not in trial. */
+  trialEndTimestamp: number | null;
+}
+
+/**
+ * Renders an amber "Trial ends in X days" badge when a trial is active.
+ * Shows "Trial ends today" when fewer than 1 full day remains.
+ * Returns null (no badge) when not in a trial.
+ */
+export function TrialBadge({ trialEndTimestamp }: TrialBadgeProps) {
+  if (trialEndTimestamp === null) return null;
+
+  const nowSecs = Math.floor(Date.now() / 1000);
+  if (trialEndTimestamp <= nowSecs) return null; // trial already ended
+
+  const daysRemaining = Math.ceil((trialEndTimestamp - nowSecs) / (24 * 60 * 60));
+  const label =
+    daysRemaining <= 1
+      ? "Trial ends today"
+      : `Trial ends in ${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}`;
+
+  const exactDate = new Date(trialEndTimestamp * 1000).toLocaleString();
+
+  return (
+    <span
+      className="trial-badge"
+      aria-label={`Trial period active. ${label}`}
+      data-testid="trial-badge"
+      title={exactDate}
+    >
+      🎁 {label}
+    </span>
+  );
+}
+
 // ── SubscriptionCard ──────────────────────────────────────────────────────────
+
+function StackedRow({
+  label,
+  value,
+  isMobile,
+}: {
+  label: string;
+  value: string;
+  isMobile: boolean;
+}) {
+  return (
+    <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
+      <span className="subscription-row__label">{label}</span>
+      <span className="subscription-row__value">{value}</span>
+    </div>
+  );
+}
 
 export default function SubscriptionCard({
   subscription,
   userKey,
   onSign,
   onRefresh,
-}: SubscriptionCardProps) {
-  const { merchant, amount, interval, last_charged, active, paused, trial_duration } =
-    subscription;
   onCancelled,
-}: SubscriptionCardProps & { userKey: string }) {
+}: SubscriptionCardProps) {
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
-  const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
+  const { merchant, amount, interval, last_charged, active, paused } = subscription;
+
   const nextChargeTimestamp = last_charged + interval;
   const xlm = (Number(amount) / STROOPS_PER_XLM).toFixed(2);
-  const { isInTrial } = formatTrialStatus(trial_duration || 0, last_charged);
 
-  // ── Pause / resume state ───────────────────────────────────────────────────
-  const [showPauseConfirm, setShowPauseConfirm] = React.useState(false);
-  const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
-  const [cancelLoading, setCancelLoading] = React.useState(false);
-  const [cancelStatus, setCancelStatus] = React.useState("");
+  // ── Cancel state ───────────────────────────────────────────────────────────
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelStatus, setCancelStatus] = useState("");
 
+  // ── Pause / resume via hook ────────────────────────────────────────────────
+  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const { pause, resume, pauseTx, resumeTx } = usePauseResume(userKey, onSign, onRefresh);
+
+  // ── Allowance health state ─────────────────────────────────────────────────
+  const [allowance, setAllowance] = useState<bigint | null>(null);
+  const [allowanceLoading, setAllowanceLoading] = useState(true);
+  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+
+  const amountBigInt = BigInt(amount);
+  const health = computeAllowanceHealth(allowance, amountBigInt);
+
+  // ── Trial period state (Issue #666) ───────────────────────────────────────
+  /** Unix timestamp (seconds) when trial ends, or null if no active trial. */
+  const [trialEndTimestamp, setTrialEndTimestamp] = useState<number | null>(null);
 
   useRegisterShortcuts(
     active
@@ -179,13 +228,38 @@ export default function SubscriptionCard({
           {
             key: "x",
             description: "Cancel active subscription",
-            action: () => {
-              setShowCancelConfirm(true);
-            },
+            action: () => setShowCancelConfirm(true),
           },
         ]
       : []
   );
+
+  // Fetch allowance on mount / when user changes
+  useEffect(() => {
+    if (!active) return;
+    setAllowanceLoading(true);
+    getAllowance(userKey)
+      .then((val) => setAllowance(val))
+      .catch(() => setAllowance(null)) // RPC error → "unknown" state
+      .finally(() => setAllowanceLoading(false));
+  }, [userKey, active]);
+
+  // Fetch trial end timestamp on mount / when user changes (Issue #666)
+  useEffect(() => {
+    if (!active) return;
+    getTrialEnd(userKey)
+      .then((ts) => {
+        if (ts === null) {
+          setTrialEndTimestamp(null);
+          return;
+        }
+        const tsSeconds = Number(ts);
+        const nowSecs = Math.floor(Date.now() / 1000);
+        // Only show badge when trial is still active
+        setTrialEndTimestamp(tsSeconds > nowSecs ? tsSeconds : null);
+      })
+      .catch(() => setTrialEndTimestamp(null)); // RPC error → hide badge, don't crash
+  }, [userKey, active]);
 
   const handleCancel = async () => {
     setCancelLoading(true);
@@ -209,36 +283,8 @@ export default function SubscriptionCard({
     }
   };
 
-  // ── Allowance health state ─────────────────────────────────────────────────
-  const [allowance, setAllowance] = useState<bigint | null>(null);
-  const [allowanceLoading, setAllowanceLoading] = useState(true);
-  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
-
-  const amountBigInt = BigInt(amount);
-  const health = computeAllowanceHealth(allowance, amountBigInt);
-
-  useEffect(() => {
-    if (!active) return; // no point checking allowance on cancelled subs
-    setAllowanceLoading(true);
-    getAllowance(userKey)
-      .then((val) => setAllowance(val))
-      .catch(() => setAllowance(null)) // RPC error → "unknown" state
-      .finally(() => setAllowanceLoading(false));
-  }, [userKey, active]);
-
-  // ── Pause / Resume handlers ────────────────────────────────────────────────
   const handlePause = async () => {
     try {
-      const { buildPauseTx } = await import("../stellar");
-      const xdr = await buildPauseTx(userKey);
-      await onPause(xdr);
-      setPauseStatus("Paused successfully.");
-      setShowPauseConfirm(false);
-      onRefresh();
-    } catch (e: unknown) {
-      setPauseStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setPauseLoading(false);
       await pause();
       setShowPauseConfirm(false);
     } catch {
@@ -248,15 +294,6 @@ export default function SubscriptionCard({
 
   const handleResume = async () => {
     try {
-      const { buildResumeTx } = await import("../stellar");
-      const xdr = await buildResumeTx(userKey);
-      await onPause(xdr);
-      setPauseStatus("Resumed successfully.");
-      onRefresh();
-    } catch (e: unknown) {
-      setPauseStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setResumeLoading(false);
       await resume();
     } catch {
       // resumeTx.error holds the failure reason
@@ -278,6 +315,8 @@ export default function SubscriptionCard({
     derivedPauseStatus = `Error: ${resumeTx.error || "Failed to resume"}`;
   }
 
+  const isInTrial = trialEndTimestamp !== null && trialEndTimestamp > Math.floor(Date.now() / 1000);
+
   return (
     <div className={`card${isMobile ? " card--mobile" : ""}`}>
       <div className="subscription-card__header">
@@ -290,8 +329,13 @@ export default function SubscriptionCard({
         </span>
       </div>
 
-      <div className={`subscription-rows${isMobile ? " subscription-rows--mobile" : ""}`}>
-        <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
+      {/* Trial period badge (Issue #666) — shown when trial is active */}
+      {active && trialEndTimestamp !== null && (
+        <div className="trial-badge-row" data-testid="trial-badge-row">
+          <TrialBadge trialEndTimestamp={trialEndTimestamp} />
+        </div>
+      )}
+
       {/* Allowance health indicator — only shown for active subscriptions */}
       {active && (
         <div className="allowance-health-row">
@@ -304,8 +348,8 @@ export default function SubscriptionCard({
         </div>
       )}
 
-      <div className="subscription-rows">
-        <div className="subscription-row">
+      <div className={`subscription-rows${isMobile ? " subscription-rows--mobile" : ""}`}>
+        <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
           <span className="subscription-row__label">Merchant</span>
           <div className="merchant-row">
             <span className="merchant-row__address">
@@ -317,7 +361,9 @@ export default function SubscriptionCard({
         <StackedRow label="Amount" value={`${xlm} XLM`} isMobile={isMobile} />
         <StackedRow label="Interval" value={formatInterval(interval)} isMobile={isMobile} />
         <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
-          <span className="subscription-row__label">Next charge</span>
+          <span className="subscription-row__label">
+            {isInTrial ? "First charge" : "Next charge"}
+          </span>
           <span className="subscription-row__value">
             {active && !paused ? (
               <NextChargeCountdown nextChargeTimestamp={nextChargeTimestamp} />
@@ -338,7 +384,6 @@ export default function SubscriptionCard({
               Pause
             </button>
             <button
-              onClick={onCancel}
               onClick={() => setShowCancelConfirm(true)}
               className="btn-danger cancel-btn"
               aria-label="Cancel subscription"
@@ -351,13 +396,6 @@ export default function SubscriptionCard({
           <>
             <button
               onClick={handleResume}
-              disabled={resumeLoading}
-              className="btn-primary resume-btn"
-            >
-              {resumeLoading ? "Resuming…" : "Resume"}
-            </button>
-            <button
-              onClick={onCancel}
               disabled={resumeTx.state === "pending"}
               className="btn-primary resume-btn"
             >
@@ -376,26 +414,16 @@ export default function SubscriptionCard({
 
       {/* Pause confirm modal */}
       {showPauseConfirm && (
-        <div
-          className="modal-overlay"
-          onClick={() => setShowPauseConfirm(false)}
-        >
+        <div className="modal-overlay" onClick={() => setShowPauseConfirm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Pause subscription?</h3>
-            <p>You won't be charged while paused. You can resume anytime.</p>
+            <p>You won&apos;t be charged while paused. You can resume anytime.</p>
             <div className="modal-actions">
-              <button
-                onClick={() => setShowPauseConfirm(false)}
-                className="btn-secondary"
-              >
+              <button onClick={() => setShowPauseConfirm(false)} className="btn-secondary">
                 Cancel
               </button>
               <button
                 onClick={handlePause}
-                disabled={pauseLoading}
-                className="btn-primary"
-              >
-                {pauseLoading ? "Pausing…" : "Pause"}
                 disabled={pauseTx.state === "pending"}
                 className="btn-primary"
               >
@@ -406,6 +434,7 @@ export default function SubscriptionCard({
         </div>
       )}
 
+      {/* Cancel confirm modal */}
       {showCancelConfirm && (
         <div className="modal-overlay" onClick={() => setShowCancelConfirm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -428,7 +457,7 @@ export default function SubscriptionCard({
         <IncreaseAllowanceModal
           userKey={userKey}
           subscriptionAmount={amountBigInt}
-          onSign={onPause}
+          onSign={onSign}
           onClose={() => setShowAllowanceModal(false)}
           onSuccess={() => {
             setShowAllowanceModal(false);
@@ -443,13 +472,6 @@ export default function SubscriptionCard({
         />
       )}
 
-      {pauseStatus && (
-        <p
-          className="form-status"
-          style={{
-            color: pauseStatus.startsWith("Error")
-              ? "var(--color-danger)"
-              : "var(--color-success)",
       {(derivedPauseStatus || cancelStatus) && (
         <p
           className="form-status"
@@ -463,15 +485,6 @@ export default function SubscriptionCard({
           {derivedPauseStatus || cancelStatus}
         </p>
       )}
-    </div>
-  );
-}
-
-function StackedRow({ label, value, isMobile }: { label: string; value: string; isMobile: boolean }) {
-  return (
-    <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
-      <span className="subscription-row__label">{label}</span>
-      <span className="subscription-row__value">{value}</span>
     </div>
   );
 }

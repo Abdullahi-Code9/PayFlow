@@ -224,6 +224,37 @@ export async function simulateBatchCharge(
   }
 }
 
+/**
+ * Returns the trial end timestamp (Unix seconds) for a user's subscription,
+ * or null if no trial is active (contract returns None).
+ *
+ * The contract encodes the trial end directly in `last_charged` — it returns
+ * `Some(last_charged)` when `last_charged > now`, and `None` once the trial
+ * has expired.
+ */
+export function getTrialEnd(user: string): Promise<bigint | null> {
+  return dedupedCall(`getTrialEnd:${user}`, async () => {
+    const contract = new Contract(CONTRACT_ID);
+    const account = await server.getAccount(user);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(contract.call("get_trial_end", addressVal(user)))
+      .setTimeout(30)
+      .build();
+
+    const result = await server.simulateTransaction(tx);
+    if ("error" in result) throw new Error((result as { error: string }).error);
+
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    if (!retval) return null;
+
+    return ScValDecoder.decodeOption(retval, ScValDecoder.decodeU64);
+  });
+}
+
 export function getDailyLimit(user: string): Promise<bigint | null> {
   return dedupedCall(`getDailyLimit:${user}`, async () => {
     const contract = new Contract(CONTRACT_ID);

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StrKey } from "@stellar/stellar-sdk";
-import React, { useMemo, useState, useEffect } from "react";
 import { buildSubscribeTx, DEFAULT_TOKEN } from "../stellar";
 import { friendlyError } from "../utils/errors";
 import { STROOPS_PER_XLM, BILLING_INTERVALS } from "../constants"; // BILLING_INTERVALS used for initial value
@@ -35,9 +34,12 @@ export default function SubscribeForm({
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
   const [referrer, setReferrer] = useState("");
   const [referrerError, setReferrerError] = useState<string | null>(null);
-  const { errors, validate } = useFormValidation();
+  const [showAddressBook, setShowAddressBook] = useState(false);
+  const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
   const { toasts, addToast, removeToast } = useToast();
   const tx = useTransaction();
+
+  const debouncedMerchant = useDebounce(merchant, 500);
 
   // Pre-fill referrer from ?ref= URL query param (Issue #661)
   useEffect(() => {
@@ -56,18 +58,6 @@ export default function SubscribeForm({
     }
   }, [userKey]);
 
-  function validateReferrer(value: string): string | null {
-    if (!value) return null; // optional field
-    if (value === userKey) return "Self-referral is not allowed.";
-    if (!StrKey.isValidEd25519PublicKey(value)) {
-      return "Invalid Stellar address format";
-  const [showAddressBook, setShowAddressBook] = useState(false);
-  const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
-  const { toasts, addToast, removeToast } = useToast();
-  const tx = useTransaction();
-
-  const debouncedMerchant = useDebounce(merchant, 500);
-
   // Validate whenever any field changes
   useEffect(() => {
     validate({ merchant, amount, interval });
@@ -82,6 +72,15 @@ export default function SubscribeForm({
       });
     }
   }, [debouncedMerchant, validateAsync]);
+
+  function validateReferrer(value: string): string | null {
+    if (!value) return null; // optional field
+    if (value === userKey) return "Self-referral is not allowed.";
+    if (!StrKey.isValidEd25519PublicKey(value)) {
+      return "Invalid Stellar address format";
+    }
+    return null;
+  }
 
   function handleReferrerChange(value: string) {
     setReferrer(value);
@@ -110,7 +109,6 @@ export default function SubscribeForm({
         BigInt(interval),
         DEFAULT_TOKEN,
         refAddr,
-        null,
         ""
       );
       return onSign(xdr);
@@ -213,6 +211,9 @@ export default function SubscribeForm({
           aria-invalid={!!referrerError}
           data-testid="referrer-input"
         />
+      </label>
+
+      <div className="form-group">
         {referrerError && (
           <span
             id="referrer-error"
@@ -223,11 +224,9 @@ export default function SubscribeForm({
             {referrerError}
           </span>
         )}
-      </label>
+      </div>
 
-      <button type="submit" disabled={pending} className="btn-primary subscribe-form__submit">
-        {pending ? "Confirming…" : "Subscribe"}
-      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit">
+      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit" aria-busy={pending || validating}>
         {pending ? "Confirming…" : validating ? "Validating…" : "Subscribe"}
       </button>
 
