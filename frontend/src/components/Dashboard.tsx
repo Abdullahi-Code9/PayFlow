@@ -19,6 +19,7 @@ import { usePolling } from "../hooks/usePolling";
 import { useToast } from "../hooks/useToast";
 import { useRpcHealth } from "../hooks/useRpcHealth";
 import { useTransaction } from "../hooks/useTransaction";
+import { useResponsive } from "../hooks/useResponsive";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 
 interface Props {
@@ -41,6 +42,7 @@ export default function Dashboard({
   const { subscription: sub, loading, refresh } = useSubscriptionSync(userKey, refreshTrigger);
   const { toasts, addToast, removeToast } = useToast();
   const { status: rpcStatus, latencyMs: rpcLatency, error: rpcError } = useRpcHealth();
+  const { isMobile } = useResponsive();
   const ppuTx = useTransaction();
   const [showDailyLimit, setShowDailyLimit] = useState(false);
   const [showIncreaseAllowance, setShowIncreaseAllowance] = useState(false);
@@ -106,7 +108,7 @@ export default function Dashboard({
   const ppuPending = ppuTx.status === "pending";
 
   return (
-    <div className="dashboard">
+    <div className={`dashboard${isMobile ? " dashboard--mobile" : ""}`}>
       {rpcStatus === "degraded" && (
         <div className="network-warning network-warning--degraded" role="alert">
           <span>⚠️</span>
