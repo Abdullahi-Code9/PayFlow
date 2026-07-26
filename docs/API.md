@@ -903,6 +903,24 @@ CLI example:
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- is_merchant_whitelisted --merchant <MERCHANT_ADDRESS>
 ```
 
+### `get_top_merchants_by_subs`
+
+```
+get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)>
+```
+
+Auth: none.
+
+Returns: `Vec<(Address, u32)>` (top N merchants ranked by active subscriber count in descending order).
+
+Panics: `ContractError::BatchTooLarge` if `limit > 20`.
+
+CLI example:
+
+```bash
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_top_merchants_by_subs --limit 10
+```
+
 ### `freeze_merchant`
 
 ```

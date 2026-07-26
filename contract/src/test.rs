@@ -4130,6 +4130,87 @@ fn test_min_interval_event_emitted_on_set() {
     assert_eq!(event_data3.new, 86400);
 }
 
+#[test]
+fn test_top_merchants_by_subs() {
+    let (env, contract_id, token_addr, _user, _m) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+    let m3 = Address::generate(&env);
+
+    client.add_merchant(&m1);
+    client.add_merchant(&m2);
+    client.add_merchant(&m3);
+
+    // Create subscriptions for m1 (1 sub), m2 (3 subs), m3 (2 subs)
+    let u1 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u2 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u3 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u4 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u5 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u6 = setup_funded_user(&env, &contract_id, &token_addr);
+
+    client.subscribe(&u1, &m1, &1_0000000, &86400, &token_addr, &None, &None);
+
+    client.subscribe(&u2, &m2, &1_0000000, &86400, &token_addr, &None, &None);
+    client.subscribe(&u3, &m2, &1_0000000, &86400, &token_addr, &None, &None);
+    client.subscribe(&u4, &m2, &1_0000000, &86400, &token_addr, &None, &None);
+
+    client.subscribe(&u5, &m3, &1_0000000, &86400, &token_addr, &None, &None);
+    client.subscribe(&u6, &m3, &1_0000000, &86400, &token_addr, &None, &None);
+
+    // Top 3 merchants: m2 (3 subs), m3 (2 subs), m1 (1 sub)
+    let top = client.get_top_merchants_by_subs(&3u32);
+    assert_eq!(top.len(), 3);
+    assert_eq!(top.get(0).unwrap(), (m2.clone(), 3u32));
+    assert_eq!(top.get(1).unwrap(), (m3.clone(), 2u32));
+    assert_eq!(top.get(2).unwrap(), (m1.clone(), 1u32));
+
+    // Unknown / unindexed merchant returns 0 for subscriber count query
+    let unindexed = Address::generate(&env);
+    assert_eq!(client.get_merchant_sub_count(&unindexed), 0);
+}
+
+#[test]
+fn test_top_merchants_tie_breaking_and_limit() {
+    let (env, contract_id, token_addr, _user, _m) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+
+    // Add m1 first, then m2
+    client.add_merchant(&m1);
+    client.add_merchant(&m2);
+
+    let u1 = setup_funded_user(&env, &contract_id, &token_addr);
+    let u2 = setup_funded_user(&env, &contract_id, &token_addr);
+
+    // Both m1 and m2 get 1 sub (tie)
+    client.subscribe(&u1, &m1, &1_0000000, &86400, &token_addr, &None, &None);
+    client.subscribe(&u2, &m2, &1_0000000, &86400, &token_addr, &None, &None);
+
+    // Tie-breaking preserves index order: m1 first, m2 second
+    let top = client.get_top_merchants_by_subs(&2u32);
+    assert_eq!(top.len(), 2);
+    assert_eq!(top.get(0).unwrap(), (m1.clone(), 1u32));
+    assert_eq!(top.get(1).unwrap(), (m2.clone(), 1u32));
+
+    // Limit 1 returns top 1
+    let top1 = client.get_top_merchants_by_subs(&1u32);
+    assert_eq!(top1.len(), 1);
+    assert_eq!(top1.get(0).unwrap(), (m1.clone(), 1u32));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_top_merchants_limit_exceeded_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    client.get_top_merchants_by_subs(&21u32);
+}
+
 
 /// subscribe panics with IntervalTooShort when interval < default floor of 3600.
 #[test]

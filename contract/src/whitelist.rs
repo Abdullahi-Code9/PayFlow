@@ -1,4 +1,5 @@
 use crate::events;
+use crate::merchant_stats;
 use crate::DataKey;
 use soroban_sdk::{Address, Env};
 
@@ -14,6 +15,7 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
+    merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);
 }
 
@@ -57,6 +59,7 @@ pub fn freeze(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .set(&DataKey::MerchantFrozen(merchant.clone()), &true);
+    merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_frozen(env, merchant);
 }
 

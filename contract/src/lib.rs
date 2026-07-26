@@ -85,6 +85,10 @@ pub enum DataKey {
     SubscriberIndexSize,
     // Feature: per-merchant subscriber count
     MerchantSubCount(Address),
+    // Feature: merchant index for governance/ranking
+    MerchantIndex(u32),
+    MerchantIndexSize,
+    MerchantKnown(Address),
     // Pending admin for two-step transfer
     PendingAdmin,
     // Two-step auth for protocol fee
@@ -965,6 +969,12 @@ impl FlowPay {
     /// Returns whether a merchant is whitelisted.
     pub fn is_merchant_whitelisted(env: Env, merchant: Address) -> bool {
         whitelist::is_whitelisted(&env, &merchant)
+    }
+
+    /// Returns top N merchants ranked by subscriber count in descending order.
+    /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
+    pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
+        merchant_stats::get_top_merchants_by_subs(&env, limit)
     }
 
     /// Sets a custom fee recipient for a merchant. The caller must be the merchant.
