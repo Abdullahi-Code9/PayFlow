@@ -33,6 +33,26 @@ export const DEFAULT_TOKEN =
 
 export const server = new Server(RPC_URL);
 
+/**
+ * Returns a Server instance pointing at the active RPC URL.
+ * If the user has saved a custom RPC URL in localStorage it takes precedence;
+ * otherwise the build-time VITE_RPC_URL (or its fallback) is used.
+ *
+ * Every call creates a new Server instance so callers always get the latest URL.
+ * For high-frequency work (polling hooks) the module-level `server` singleton is
+ * still appropriate, but one-off transaction calls should prefer getServer().
+ */
+export function getServer(): Server {
+  try {
+    const stored = window.localStorage.getItem("flowpay_custom_rpc_url");
+    const customUrl: string | null = stored ? (JSON.parse(stored) as string) : null;
+    if (customUrl) return new Server(customUrl);
+  } catch {
+    // localStorage unavailable or invalid JSON
+  }
+  return server;
+}
+
 // Stellar.expert explorer link for a transaction, on the active network.
 export function explorerTxUrl(hash: string): string {
   const network = NETWORK_PASSPHRASE === Networks.PUBLIC ? "public" : "testnet";
