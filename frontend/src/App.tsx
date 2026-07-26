@@ -17,6 +17,7 @@ import TabBar from "./components/TabBar";
 import ConnectWallet from "./components/ConnectWallet";
 import WalletBar from "./components/WalletBar";
 import ErrorBoundary from "./components/ErrorBoundary";
+import TxQueuePanel from "./components/TxQueuePanel";
 
 function SunIcon() {
   return (
@@ -364,6 +365,9 @@ export default function App() {
           </div>
         </>
       )}
+
+      {/* Fixed transaction queue panel — visible whenever there is at least one tx */}
+      <TxQueuePanel />
     </div>
   );
 }
