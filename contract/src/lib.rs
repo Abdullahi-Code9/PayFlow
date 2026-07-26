@@ -1092,6 +1092,8 @@ impl FlowPay {
     /// Returns the total count of whitelisted merchants.
     pub fn get_whitelist_size(env: Env) -> u32 {
         whitelist::get_whitelist_size(&env)
+    }
+
     /// Returns top N merchants ranked by subscriber count in descending order.
     /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
     pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
@@ -1333,6 +1335,14 @@ impl FlowPay {
     /// Returns the number of active subscribers for a given merchant (as u32).
     pub fn get_merchant_sub_count(env: Env, merchant: Address) -> u32 {
         subscription_count::get_merchant_sub_count(&env, &merchant)
+    }
+
+    /// Returns active subscriber counts for multiple merchants in a single call.
+    /// Capped at 50 merchants; panics with `BatchTooLarge` above that.
+    /// Returns `(addr, 0)` for merchants with no recorded count.
+    /// No auth required.
+    pub fn get_merchant_sub_counts(env: Env, merchants: Vec<Address>) -> Vec<(Address, u32)> {
+        merchant_stats::get_merchant_sub_counts(&env, &merchants)
     }
 
     /// Resets a merchant's cumulative revenue counter to zero.
