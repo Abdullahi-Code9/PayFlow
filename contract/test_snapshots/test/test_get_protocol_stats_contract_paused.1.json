@@ -1139,7 +1139,7 @@
                     "symbol": "schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 0
                   }
                 },
                 {
@@ -1304,7 +1304,7 @@
                     "symbol": "schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 0
                   }
                 },
                 {
