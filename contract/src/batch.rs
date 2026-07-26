@@ -75,3 +75,25 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
 
     results
 }
+
+/// Bumps TTL for all provided subscriptions in one call.
+/// Panics with BatchTooLarge if `users` exceeds max batch size.
+/// Skips addresses without a subscription entry.
+/// Returns a Vec<Address> of addresses that were extended.
+pub fn batch_extend_subscription_ttl(env: &Env, users: Vec<Address>) -> Vec<Address> {
+    let max_size = get_max_batch_size(env);
+    if users.len() > max_size {
+        env.panic_with_error(crate::errors::ContractError::BatchTooLarge);
+    }
+
+    let mut extended: Vec<Address> = Vec::new(env);
+    for user in users.iter() {
+        let key = DataKey::Subscription(user.clone());
+        if env.storage().persistent().has(&key) {
+            crate::storage::extend_subscription_ttl(env, &user);
+            extended.push_back(user.clone());
+        }
+    }
+    extended
+}
+

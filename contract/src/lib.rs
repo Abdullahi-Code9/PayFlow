@@ -30,6 +30,7 @@ use soroban_sdk::{
 };
 
 pub use batch::ChargeResult;
+pub use charge_exec::ChargeSimResult;
 
 // ─────────────────────────────────────────────────────────────
 // Storage keys
@@ -47,6 +48,8 @@ pub enum DataKey {
     // Merchant whitelist
     MerchantWhitelist(Address),
     WhitelistEnabled,
+    WhitelistIndex(u32),
+    WhitelistIndexSize,
     // Merchant freeze: blocks new subscriptions, independent of whitelist status
     MerchantFrozen(Address),
     // Protocol fee
@@ -89,6 +92,10 @@ pub enum DataKey {
     SubscriberIndexRemoved(u64),
     // Feature: per-merchant subscriber count
     MerchantSubCount(Address),
+    // Feature: merchant index for governance/ranking
+    MerchantIndex(u32),
+    MerchantIndexSize,
+    MerchantKnown(Address),
     // Pending admin for two-step transfer
     PendingAdmin,
     // Two-step auth for protocol fee
@@ -103,6 +110,11 @@ pub enum DataKey {
     PauseExpiry(Address),
     // Feature: cumulative protocol fees collected across all merchants
     TotalProtocolFees,
+    // Feature: configurable global hourly volume cap override
+    GlobalVolumeCapOverride,
+    // Feature: configurable min/max fee bps bounds
+    MinFeeBps,
+    MaxFeeBps,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -134,6 +146,18 @@ pub struct Subscription {
     pub referrer: Option<Address>, // optional referral address
     pub label: Symbol,             // user-assigned label for this subscription
     pub trial_duration: u64,       // optional trial duration in seconds
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionHealth {
+    pub active: bool,
+    pub charge_due: bool,
+    pub within_grace: bool,
+    pub has_sufficient_allowance: bool,
+    pub is_paused: bool,
+    pub trial_active: bool,
+    pub daily_limit_set: bool,
 }
 
 #[contracttype]
@@ -433,6 +457,18 @@ impl FlowPay {
     /// No auth required — safe for keeper bots to call for dormant subscribers.
     pub fn bump_subscription(env: Env, user: Address) {
         extend_subscription_ttl(&env, &user);
+    }
+
+    /// Bumps TTL for multiple subscription entries in a single call.
+    /// Returns a list of addresses whose TTLs were actually extended.
+    pub fn batch_extend_subscription_ttl(env: Env, users: Vec<Address>) -> Vec<Address> {
+        batch::batch_extend_subscription_ttl(&env, users)
+    }
+
+    /// Dry-run simulation of a charge call. Returns ChargeSimResult variant indicating
+    /// whether charge would succeed or the reason it would fail.
+    pub fn simulate_charge(env: Env, user: Address) -> ChargeSimResult {
+        charge_exec::simulate_charge(&env, user)
     }
 
     /// Executes an immediate pay-per-use charge for an active subscription.
@@ -966,7 +1002,6 @@ impl FlowPay {
         assert!(seconds > 0, "min interval must be positive");
         admin::require_admin(&env);
         min_interval::set_min_interval(&env, seconds);
-        events::publish_min_interval_updated(&env, seconds);
     }
 
     /// Returns the minimum allowed subscription interval in seconds.
@@ -1034,6 +1069,11 @@ impl FlowPay {
         whitelist::set_whitelist_enabled(&env, enabled);
     }
 
+    /// Returns whether the merchant whitelist is currently enabled. Defaults to true.
+    pub fn get_whitelist_enabled(env: Env) -> bool {
+        whitelist::get_whitelist_enabled(&env)
+    }
+
     /// Returns whether the merchant whitelist is currently enabled.
     pub fn is_whitelist_enabled(env: Env) -> bool {
         whitelist::is_whitelist_enabled(&env)
@@ -1042,6 +1082,20 @@ impl FlowPay {
     /// Returns whether a merchant is whitelisted.
     pub fn is_merchant_whitelisted(env: Env, merchant: Address) -> bool {
         whitelist::is_whitelisted(&env, &merchant)
+    }
+
+    /// Returns a paginated vector of whitelisted merchants.
+    pub fn get_whitelist_page(env: Env, offset: u32, limit: u32) -> Vec<Address> {
+        whitelist::get_whitelist_page(&env, offset, limit)
+    }
+
+    /// Returns the total count of whitelisted merchants.
+    pub fn get_whitelist_size(env: Env) -> u32 {
+        whitelist::get_whitelist_size(&env)
+    /// Returns top N merchants ranked by subscriber count in descending order.
+    /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
+    pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
+        merchant_stats::get_top_merchants_by_subs(&env, limit)
     }
 
     /// Sets a custom fee recipient for a merchant. The caller must be the merchant.
@@ -1206,6 +1260,60 @@ impl FlowPay {
     /// Oldest -> newest. Returns an empty Vec when no history has been recorded or after clearing.
     pub fn get_merchant_revenue_history(env: Env, merchant: Address, days: u32) -> Vec<i128> {
         merchant_stats::get_merchant_revenue_history(&env, &merchant, days)
+    }
+
+    /// Returns aggregate revenue statistics for a merchant: (total, count, min_charge, max_charge).
+    pub fn get_merchant_revenue_summary(env: Env, merchant: Address) -> (i128, i128, i128, i128) {
+        merchant_stats::get_merchant_revenue_summary(&env, &merchant)
+    }
+
+    /// Returns a composite health report for a user's subscription.
+    pub fn get_subscription_health(env: Env, user: Address) -> SubscriptionHealth {
+        let sub = match storage::get_subscription(&env, &user) {
+            Some(s) => s,
+            None => {
+                return SubscriptionHealth {
+                    active: false,
+                    charge_due: false,
+                    within_grace: false,
+                    has_sufficient_allowance: false,
+                    is_paused: false,
+                    trial_active: false,
+                    daily_limit_set: false,
+                }
+            }
+        };
+
+        let active = sub.active;
+        let is_paused = sub.paused;
+        let charge_due = Self::is_charge_due(env.clone(), user.clone());
+
+        let next_charge = charge_exec::compute_next_charge_at(&sub);
+        let now = env.ledger().timestamp();
+        let grace = grace::get_grace_period(&env);
+
+        let within_grace = if let Some(next) = next_charge {
+            now >= next && grace > 0 && now <= next + grace
+        } else {
+            false
+        };
+
+        let has_sufficient_allowance = soroban_sdk::token::Client::new(&env, &sub.token)
+            .allowance(&user, &env.current_contract_address())
+            >= sub.amount;
+
+        let trial_active = trial::get_trial_end(env.clone(), user.clone()).is_some();
+        let daily_limit_set = spending_limit::get_daily_limit(&env, &user).is_some();
+
+        SubscriptionHealth {
+            active,
+            charge_due,
+            within_grace,
+            has_sufficient_allowance,
+            is_paused,
+            trial_active,
+            daily_limit_set,
+        }
     }
 
     /// Clears the merchant's revenue history Vec from persistent storage.
@@ -1484,9 +1592,15 @@ impl FlowPay {
     }
 
     /// Returns a paginated slice of charge timestamps for a subscriber.
-    /// limit is capped at 12.
-    pub fn get_charge_history_page(env: Env, user: Address, offset: u32, limit: u32) -> Vec<u64> {
-        subscription_history::get_charge_history_page(&env, &user, offset, limit)
+    /// limit is capped at 12. If `ascending` is false, records are returned in descending order (newest first).
+    pub fn get_charge_history_page(
+        env: Env,
+        user: Address,
+        offset: u32,
+        limit: u32,
+        ascending: bool,
+    ) -> Vec<u64> {
+        subscription_history::get_charge_history_page(&env, &user, offset, limit, ascending)
     }
 
     /// Transfers subscription ownership from `user` to `new_user`.
@@ -1538,6 +1652,110 @@ impl FlowPay {
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable global hourly volume cap
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns the currently effective global hourly volume cap (stroops).
+    /// Falls back to the compile-time `GLOBAL_MAX_VOLUME_PER_HOUR` default
+    /// when no operator override has been configured.
+    pub fn get_global_volume_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::GlobalVolumeCapOverride)
+            .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR)
+    }
+
+    /// Admin-only: overrides the global hourly volume cap without requiring
+    /// a contract upgrade. `new_cap` must be strictly positive.
+    pub fn set_global_volume_cap(env: Env, new_cap: i128) {
+        admin::require_admin(&env);
+        if new_cap <= 0 {
+            env.panic_with_error(ContractError::InvalidVolumeCap);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalVolumeCapOverride, &new_cap);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Configurable fee bounds (governance guardrails)
+    // ─────────────────────────────────────────────────────────────
+
+    /// Admin-only: configures the allowed [min_bps, max_bps] range for
+    /// future fee proposals, guarding against accidental fee misconfiguration
+    /// (e.g. an operator typo setting bps close to 10000).
+    pub fn set_fee_bounds(env: Env, min_bps: u32, max_bps: u32) {
+        admin::require_admin(&env);
+        if min_bps > max_bps || max_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidFeeBounds);
+        }
+        env.storage().instance().set(&DataKey::MinFeeBps, &min_bps);
+        env.storage().instance().set(&DataKey::MaxFeeBps, &max_bps);
+    }
+
+    /// Returns the configured (min_bps, max_bps) fee bounds, defaulting to
+    /// (0, 10000) when governance has not configured explicit bounds.
+    pub fn get_fee_bounds(env: Env) -> (u32, u32) {
+        let min_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinFeeBps)
+            .unwrap_or(0u32);
+        let max_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxFeeBps)
+            .unwrap_or(10_000u32);
+        (min_bps, max_bps)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Lightweight subscription reads
+    // ─────────────────────────────────────────────────────────────
+
+    /// Returns just the merchant address for a user's subscription, without
+    /// decoding the full `Subscription` struct. Lighter-weight than
+    /// `get_subscription` for callers that only need to know which merchant
+    /// a user subscribes to.
+    pub fn get_subscriber_merchant(env: Env, user: Address) -> Option<Address> {
+        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+        Some(sub.merchant)
+    }
+
+    /// Returns a page of subscriber addresses starting at `offset`, capped
+    /// at 50 per call, filtered to only those whose subscription is
+    /// currently active. Avoids forcing callers to over-fetch via
+    /// `get_subscriber_page` and filter client-side.
+    pub fn get_active_subscriber_page(env: Env, offset: u64, limit: u32) -> Vec<Address> {
+        let count = subscription_count::get_subscriber_index_size(&env);
+        let cap: u32 = if limit > 50 { 50 } else { limit };
+        let mut result = Vec::new(&env);
+        if offset >= count || cap == 0 {
+            return result;
+        }
+        let mut i = offset;
+        while i < count && result.len() < cap {
+            if let Some(addr) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Address>(&DataKey::SubscriberIndex(i))
+            {
+                if let Some(sub) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, Subscription>(&DataKey::Subscription(addr.clone()))
+                {
+                    if sub.active {
+                        result.push_back(addr);
+                    }
+                }
+            }
+            i += 1;
+        }
+        result
     }
 }
 
@@ -1595,11 +1813,15 @@ fn pay_per_use_inner(env: &Env, user: Address, amount: i128, recipient: Option<A
     let is_pay_per_use_to = recipient.is_some();
     let recipient = recipient.unwrap_or_else(|| sub.merchant.clone());
 
-    if is_pay_per_use_to
-        && whitelist::is_whitelist_enabled(env)
-        && !whitelist::is_whitelisted(env, &recipient)
-    {
-        env.panic_with_error(ContractError::MerchantNotWhitelisted);
+    if is_pay_per_use_to {
+        if recipient == env.current_contract_address() {
+            env.panic_with_error(ContractError::InvalidRecipient);
+        }
+        if whitelist::is_whitelist_enabled(env)
+            && !whitelist::is_whitelisted(env, &recipient)
+        {
+            env.panic_with_error(ContractError::MerchantNotWhitelisted);
+        }
     }
 
     spending_limit::enforce_limit(env, &user, amount);
@@ -1647,14 +1869,7 @@ fn subscribe_inner(
     }
 
     validation::require_valid_amount(env, amount);
-
-    if interval < 60 {
-        env.panic_with_error(ContractError::IntervalTooShort);
-    }
-
-    if interval < min_interval::get_min_interval(env) {
-        env.panic_with_error(ContractError::IntervalTooShort);
-    }
+    validation::validate_interval(env, interval);
 
     use soroban_sdk::xdr::ToXdr;
     if token.clone().to_xdr(env).get(7) == Some(0) {

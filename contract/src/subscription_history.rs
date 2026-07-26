@@ -71,9 +71,28 @@ pub fn clear_charge_history(env: &Env, user: &Address) {
 }
 
 /// Returns a paginated slice of charge timestamps for a subscriber.
-/// `limit` is capped at 12.
-pub fn get_charge_history_page(env: &Env, user: &Address, offset: u32, limit: u32) -> Vec<u64> {
+/// `limit` is capped at 12. If `ascending` is false, records are returned in descending order (newest first).
+pub fn get_charge_history_page(
+    env: &Env,
+    user: &Address,
+    offset: u32,
+    limit: u32,
+    ascending: bool,
+) -> Vec<u64> {
     let history = get_charge_history(env, user);
+    let mut ordered_history = Vec::new(env);
+
+    let total = history.len();
+    if !ascending && total > 0 {
+        let mut i = total;
+        while i > 0 {
+            i -= 1;
+            ordered_history.push_back(history.get(i).unwrap());
+        }
+    } else {
+        ordered_history = history;
+    }
+
     let mut page = Vec::new(env);
 
     let effective_limit = if limit > MAX_HISTORY {
@@ -82,19 +101,19 @@ pub fn get_charge_history_page(env: &Env, user: &Address, offset: u32, limit: u3
         limit
     };
 
-    let total = history.len();
-    if offset >= total {
+    let total_ordered = ordered_history.len();
+    if offset >= total_ordered {
         return page;
     }
 
-    let end = if offset + effective_limit > total {
-        total
+    let end = if offset + effective_limit > total_ordered {
+        total_ordered
     } else {
         offset + effective_limit
     };
 
     for i in offset..end {
-        page.push_back(history.get(i).unwrap());
+        page.push_back(ordered_history.get(i).unwrap());
     }
 
     page
