@@ -64,6 +64,25 @@ pub fn calculate_fee_amount(amount: i128, bps: u32) -> i128 {
     amount * (bps as i128) / 10_000
 }
 
+/// Returns the cumulative protocol fees collected across all merchants.
+pub fn get_total_protocol_fees(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::TotalProtocolFees)
+        .unwrap_or(0)
+}
+
+/// Adds `amount` to the cumulative protocol fee total.
+fn accumulate_protocol_fees(env: &Env, amount: i128) {
+    if amount <= 0 {
+        return;
+    }
+    let total = get_total_protocol_fees(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalProtocolFees, &(total + amount));
+}
+
 /// Transfers subscription charge amounts (fee to collector, net to merchant).
 /// Returns the fee amount deducted from the gross subscription amount.
 pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscription) -> i128 {
@@ -74,6 +93,7 @@ pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscriptio
             if fee > 0 {
                 let token_client = token::Client::new(env, &sub.token);
                 token_client.transfer_from(&env.current_contract_address(), user, &collector, &fee);
+                accumulate_protocol_fees(env, fee);
             }
             fee
         }
@@ -110,6 +130,7 @@ pub fn transfer_pay_per_use(
             if fee > 0 {
                 let token_client = token::Client::new(env, token);
                 token_client.transfer_from(&env.current_contract_address(), user, &collector, &fee);
+                accumulate_protocol_fees(env, fee);
             }
             fee
         }
