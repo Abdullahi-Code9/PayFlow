@@ -144,3 +144,35 @@ pub fn get_merchant_revenue_day(env: &Env, merchant: &Address, day: u64) -> i128
     let key = DataKey::MerchantRevenueDay(merchant.clone(), day);
     env.storage().persistent().get(&key).unwrap_or(0i128)
 }
+
+/// Returns aggregate revenue statistics for a merchant: (total, count, min_charge, max_charge).
+/// Returns (0, 0, 0, 0) if no revenue history exists.
+pub fn get_merchant_revenue_summary(env: &Env, merchant: &Address) -> (i128, i128, i128, i128) {
+    let total = get_merchant_revenue(env, merchant);
+    let history: Vec<i128> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::MerchantRevenueHistory(merchant.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if history.is_empty() {
+        return (total, 0, 0, 0);
+    }
+
+    let count = history.len() as i128;
+    let mut min_charge = history.get(0).unwrap();
+    let mut max_charge = history.get(0).unwrap();
+
+    for i in 1..history.len() {
+        let val = history.get(i).unwrap();
+        if val < min_charge {
+            min_charge = val;
+        }
+        if val > max_charge {
+            max_charge = val;
+        }
+    }
+
+    (total, count, min_charge, max_charge)
+}
+

@@ -48,6 +48,8 @@ pub enum DataKey {
     // Merchant whitelist
     MerchantWhitelist(Address),
     WhitelistEnabled,
+    WhitelistIndex(u32),
+    WhitelistIndexSize,
     // Merchant freeze: blocks new subscriptions, independent of whitelist status
     MerchantFrozen(Address),
     // Protocol fee
@@ -129,6 +131,18 @@ pub struct Subscription {
     pub referrer: Option<Address>, // optional referral address
     pub label: Symbol,             // user-assigned label for this subscription
     pub trial_duration: u64,       // optional trial duration in seconds
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionHealth {
+    pub active: bool,
+    pub charge_due: bool,
+    pub within_grace: bool,
+    pub has_sufficient_allowance: bool,
+    pub is_paused: bool,
+    pub trial_active: bool,
+    pub daily_limit_set: bool,
 }
 
 #[contracttype]
@@ -976,6 +990,16 @@ impl FlowPay {
         whitelist::is_whitelisted(&env, &merchant)
     }
 
+    /// Returns a paginated vector of whitelisted merchants.
+    pub fn get_whitelist_page(env: Env, offset: u32, limit: u32) -> Vec<Address> {
+        whitelist::get_whitelist_page(&env, offset, limit)
+    }
+
+    /// Returns the total count of whitelisted merchants.
+    pub fn get_whitelist_size(env: Env) -> u32 {
+        whitelist::get_whitelist_size(&env)
+    }
+
     /// Sets a custom fee recipient for a merchant. The caller must be the merchant.
     /// The recipient cannot be the contract address and contract must not be paused.
     pub fn set_merchant_fee_recipient(env: Env, merchant: Address, recipient: Address) {
@@ -1131,6 +1155,60 @@ impl FlowPay {
     /// Oldest -> newest. Returns an empty Vec when no history has been recorded or after clearing.
     pub fn get_merchant_revenue_history(env: Env, merchant: Address, days: u32) -> Vec<i128> {
         merchant_stats::get_merchant_revenue_history(&env, &merchant, days)
+    }
+
+    /// Returns aggregate revenue statistics for a merchant: (total, count, min_charge, max_charge).
+    pub fn get_merchant_revenue_summary(env: Env, merchant: Address) -> (i128, i128, i128, i128) {
+        merchant_stats::get_merchant_revenue_summary(&env, &merchant)
+    }
+
+    /// Returns a composite health report for a user's subscription.
+    pub fn get_subscription_health(env: Env, user: Address) -> SubscriptionHealth {
+        let sub = match storage::get_subscription(&env, &user) {
+            Some(s) => s,
+            None => {
+                return SubscriptionHealth {
+                    active: false,
+                    charge_due: false,
+                    within_grace: false,
+                    has_sufficient_allowance: false,
+                    is_paused: false,
+                    trial_active: false,
+                    daily_limit_set: false,
+                }
+            }
+        };
+
+        let active = sub.active;
+        let is_paused = sub.paused;
+        let charge_due = Self::is_charge_due(env.clone(), user.clone());
+
+        let next_charge = charge_exec::compute_next_charge_at(&sub);
+        let now = env.ledger().timestamp();
+        let grace = grace::get_grace_period(&env);
+
+        let within_grace = if let Some(next) = next_charge {
+            now >= next && grace > 0 && now <= next + grace
+        } else {
+            false
+        };
+
+        let has_sufficient_allowance = soroban_sdk::token::Client::new(&env, &sub.token)
+            .allowance(&user, &env.current_contract_address())
+            >= sub.amount;
+
+        let trial_active = trial::get_trial_end(env.clone(), user.clone()).is_some();
+        let daily_limit_set = spending_limit::get_daily_limit(&env, &user).is_some();
+
+        SubscriptionHealth {
+            active,
+            charge_due,
+            within_grace,
+            has_sufficient_allowance,
+            is_paused,
+            trial_active,
+            daily_limit_set,
+        }
     }
 
     /// Clears the merchant's revenue history Vec from persistent storage.
@@ -1583,14 +1661,7 @@ fn subscribe_inner(
     }
 
     validation::require_valid_amount(env, amount);
-
-    if interval < 60 {
-        env.panic_with_error(ContractError::IntervalTooShort);
-    }
-
-    if interval < min_interval::get_min_interval(env) {
-        env.panic_with_error(ContractError::IntervalTooShort);
-    }
+    validation::validate_interval(env, interval);
 
     use soroban_sdk::xdr::ToXdr;
     if token.clone().to_xdr(env).get(7) == Some(0) {

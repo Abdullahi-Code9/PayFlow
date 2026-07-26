@@ -5199,9 +5199,9 @@ fn test_set_subscription_interval_admin_succeeds() {
     );
 }
 
-/// Setting an interval of zero must panic with IntervalTooShort.
+/// Setting an interval of zero must panic with IntervalMustBePositive.
 #[test]
-#[should_panic(expected = "Error(Contract, #19)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_set_subscription_interval_zero_panics() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -5935,4 +5935,283 @@ fn test_pay_per_use_to_zero_fee_bps_full_amount_to_recipient() {
 
     assert_eq!(token.balance(&recipient) - recipient_before, amount);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Tests for Issue #634: get_merchant_revenue_summary
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_merchant_revenue_summary_empty() {
+    let (env, contract_id, _token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let summary = client.get_merchant_revenue_summary(&merchant);
+    assert_eq!(summary, (0, 0, 0, 0));
+}
+
+#[test]
+fn test_merchant_revenue_summary_single_and_multiple_charges() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let amount: i128 = 10_0000000;
+    client.subscribe(&user, &merchant, &amount, &86400, &token_addr, &None, &None);
+    client.pay_per_use(&user, &amount);
+
+    // First charge recorded: 10_0000000
+    let summary1 = client.get_merchant_revenue_summary(&merchant);
+    assert_eq!(summary1, (amount, 1, amount, amount));
+
+    // Additional pay_per_use calls with different amounts
+    client.pay_per_use(&user, &5_0000000);
+    client.pay_per_use(&user, &25_0000000);
+
+    let summary2 = client.get_merchant_revenue_summary(&merchant);
+    // total = 10 + 5 + 25 = 40_0000000
+    // count = 3
+    // min = 5_0000000
+    // max = 25_0000000
+    assert_eq!(summary2, (40_0000000, 3, 5_0000000, 25_0000000));
+}
+
+#[test]
+fn test_merchant_revenue_summary_cleared_history() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+    client.pay_per_use(&user, &10_0000000);
+    client.clear_merchant_revenue_history(&merchant);
+
+    let summary = client.get_merchant_revenue_summary(&merchant);
+    // History cleared -> total remains 10_0000000, count/min/max return 0
+    assert_eq!(summary, (10_0000000, 0, 0, 0));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tests for Issue #635: get_subscription_health
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_subscription_health_non_existent_user() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let unknown = Address::generate(&env);
+
+    let health = client.get_subscription_health(&unknown);
+    assert_eq!(
+        health,
+        SubscriptionHealth {
+            active: false,
+            charge_due: false,
+            within_grace: false,
+            has_sufficient_allowance: false,
+            is_paused: false,
+            trial_active: false,
+            daily_limit_set: false,
+        }
+    );
+}
+
+#[test]
+fn test_subscription_health_active_healthy() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.active, true);
+    assert_eq!(health.charge_due, false);
+    assert_eq!(health.within_grace, false);
+    assert_eq!(health.has_sufficient_allowance, true);
+    assert_eq!(health.is_paused, false);
+    assert_eq!(health.trial_active, false);
+    assert_eq!(health.daily_limit_set, false);
+}
+
+#[test]
+fn test_subscription_health_paused() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+    client.pause(&user);
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.active, true);
+    assert_eq!(health.is_paused, true);
+    assert_eq!(health.charge_due, false);
+}
+
+#[test]
+fn test_subscription_health_trial_active() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let trial_sec = 7 * 86400;
+    client.subscribe(
+        &user,
+        &merchant,
+        &10_0000000,
+        &86400,
+        &token_addr,
+        &Some(trial_sec),
+        &None,
+    );
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.trial_active, true);
+}
+
+#[test]
+fn test_subscription_health_grace_period() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    client.propose_grace_period(&86400);
+    client.commit_grace_period();
+
+    let interval = 86400;
+    client.subscribe(&user, &merchant, &10_0000000, &interval, &token_addr, &None, &None);
+
+    // Fast-forward ledger past interval, into grace period window
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: env.ledger().timestamp() + interval + 3600,
+        protocol_version: 20,
+        sequence_number: 100,
+        network_id: [0u8; 32],
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 16,
+        max_entry_ttl: 3110400,
+    });
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.charge_due, true);
+    assert_eq!(health.within_grace, true);
+}
+
+#[test]
+fn test_subscription_health_insufficient_allowance() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+
+    // Revoke allowance
+    token.approve(&user, &contract_id, &0, &1000);
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.has_sufficient_allowance, false);
+}
+
+#[test]
+fn test_subscription_health_daily_limit_set() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+    client.set_daily_limit(&user, &50_0000000);
+
+    let health = client.get_subscription_health(&user);
+    assert_eq!(health.daily_limit_set, true);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tests for Issue #636: validate_interval hardening
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_subscribe_interval_zero_panics() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &10_0000000, &0, &token_addr, &None, &None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #19)")]
+fn test_set_subscription_interval_below_min_interval_panics() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    client.subscribe(&user, &merchant, &10_0000000, &86400, &token_addr, &None, &None);
+
+    // Setting interval to 100 seconds when MinInterval is default 3600 panics with #19 (IntervalTooShort)
+    client.set_subscription_interval(&user, &100);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tests for Issue #637: WhitelistIndex & pagination
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_whitelist_index_size_page_and_swap_remove() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    assert_eq!(client.get_whitelist_size(), 0);
+    assert_eq!(client.get_whitelist_page(&0, &10).len(), 0);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+    let m3 = Address::generate(&env);
+
+    client.add_merchant(&m1);
+    client.add_merchant(&m2);
+    client.add_merchant(&m3);
+
+    // Idempotent double add does not increment index size
+    client.add_merchant(&m2);
+
+    assert_eq!(client.get_whitelist_size(), 3);
+
+    let page_all = client.get_whitelist_page(&0, &10);
+    assert_eq!(page_all.len(), 3);
+    assert_eq!(page_all.get(0).unwrap(), m1);
+    assert_eq!(page_all.get(1).unwrap(), m2);
+    assert_eq!(page_all.get(2).unwrap(), m3);
+
+    // Test pagination offset & limit
+    let page_subset = client.get_whitelist_page(&1, &1);
+    assert_eq!(page_subset.len(), 1);
+    assert_eq!(page_subset.get(0).unwrap(), m2);
+
+    // Remove middle item (m2) -> swap-remove moves m3 into index 1
+    client.remove_merchant(&m2);
+    assert_eq!(client.get_whitelist_size(), 2);
+
+    let page_after_remove = client.get_whitelist_page(&0, &10);
+    assert_eq!(page_after_remove.len(), 2);
+    assert_eq!(page_after_remove.get(0).unwrap(), m1);
+    assert_eq!(page_after_remove.get(1).unwrap(), m3);
+
+    // Idempotent double remove does nothing
+    client.remove_merchant(&m2);
+    assert_eq!(client.get_whitelist_size(), 2);
+}
+
 
