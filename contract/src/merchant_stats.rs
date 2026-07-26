@@ -89,8 +89,94 @@ pub fn get_merchant_subscriber_count(env: &Env, merchant: &Address) -> u64 {
         .unwrap_or(0u64)
 }
 
+/// Returns the total number of entries in the merchant index.
+pub fn get_merchant_index_size(env: &Env) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MerchantIndexSize)
+        .unwrap_or(0u32)
+}
+
+/// Indexes a merchant if not already indexed.
+pub fn index_merchant(env: &Env, merchant: &Address) {
+    let known_key = DataKey::MerchantKnown(merchant.clone());
+    if !env.storage().persistent().has(&known_key) {
+        let slot = get_merchant_index_size(env);
+        let index_key = DataKey::MerchantIndex(slot);
+        env.storage().persistent().set(&index_key, merchant);
+        env.storage().persistent().extend_ttl(&index_key, 1555200, 1555200);
+
+        env.storage().persistent().set(&known_key, &true);
+        env.storage().persistent().extend_ttl(&known_key, 1555200, 1555200);
+
+        let size_key = DataKey::MerchantIndexSize;
+        env.storage().persistent().set(&size_key, &(slot + 1));
+        env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
+    }
+}
+
+/// Returns top N merchants ranked by active subscriber count in descending order.
+/// `limit` is capped at 20; panics with `BatchTooLarge` if exceeded.
+pub fn get_top_merchants_by_subs(env: &Env, limit: u32) -> Vec<(Address, u32)> {
+    if limit > 20 {
+        env.panic_with_error(crate::errors::ContractError::BatchTooLarge);
+    }
+
+    let total = get_merchant_index_size(env);
+    let mut list: Vec<(Address, u32)> = Vec::new(env);
+
+    for i in 0..total {
+        if let Some(merchant) = env
+            .storage()
+            .persistent()
+            .get::<_, Address>(&DataKey::MerchantIndex(i))
+        {
+            let count = get_merchant_subscriber_count(env, &merchant) as u32;
+            list.push_back((merchant, count));
+        }
+    }
+
+    let len = list.len();
+    let mut sorted = Vec::new(env);
+    if len > 0 {
+        for i in 0..len {
+            let item = list.get(i).unwrap();
+            let mut inserted = false;
+            let mut new_sorted = Vec::new(env);
+            let s_len = sorted.len();
+
+            for j in 0..s_len {
+                let existing = sorted.get(j).unwrap();
+                if !inserted && item.1 > existing.1 {
+                    new_sorted.push_back(item.clone());
+                    inserted = true;
+                }
+                new_sorted.push_back(existing);
+            }
+            if !inserted {
+                new_sorted.push_back(item);
+            }
+            sorted = new_sorted;
+        }
+    }
+
+    let effective_limit = if limit < sorted.len() {
+        limit
+    } else {
+        sorted.len()
+    };
+
+    let mut result = Vec::new(env);
+    for i in 0..effective_limit {
+        result.push_back(sorted.get(i).unwrap());
+    }
+
+    result
+}
+
 /// Increments the per-merchant subscriber count by 1.
 pub fn increment_subscriber_count(env: &Env, merchant: &Address) {
+    index_merchant(env, merchant);
     let count = get_merchant_subscriber_count(env, merchant);
     let key = DataKey::MerchantSubCount(merchant.clone());
     env.storage()
@@ -144,3 +230,35 @@ pub fn get_merchant_revenue_day(env: &Env, merchant: &Address, day: u64) -> i128
     let key = DataKey::MerchantRevenueDay(merchant.clone(), day);
     env.storage().persistent().get(&key).unwrap_or(0i128)
 }
+
+/// Returns aggregate revenue statistics for a merchant: (total, count, min_charge, max_charge).
+/// Returns (0, 0, 0, 0) if no revenue history exists.
+pub fn get_merchant_revenue_summary(env: &Env, merchant: &Address) -> (i128, i128, i128, i128) {
+    let total = get_merchant_revenue(env, merchant);
+    let history: Vec<i128> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::MerchantRevenueHistory(merchant.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if history.is_empty() {
+        return (total, 0, 0, 0);
+    }
+
+    let count = history.len() as i128;
+    let mut min_charge = history.get(0).unwrap();
+    let mut max_charge = history.get(0).unwrap();
+
+    for i in 1..history.len() {
+        let val = history.get(i).unwrap();
+        if val < min_charge {
+            min_charge = val;
+        }
+        if val > max_charge {
+            max_charge = val;
+        }
+    }
+
+    (total, count, min_charge, max_charge)
+}
+

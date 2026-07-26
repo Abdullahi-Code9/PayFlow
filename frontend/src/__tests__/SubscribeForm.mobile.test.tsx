@@ -1,6 +1,16 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import SubscribeForm from "../components/SubscribeForm";
+
+// SubscribeForm → AllowanceDisplay → stellar (getAllowance)
+// ReferralPanel (via import in SubscribeForm) → stellar (fetchEvents)
+vi.mock("../stellar", () => ({
+  getAllowance: vi.fn(() => Promise.resolve(0n)),
+  fetchEvents: vi.fn(() => Promise.resolve([])),
+  buildSubscribeTx: vi.fn(),
+  DEFAULT_TOKEN: "CTOKEN",
+}));
 
 // Mock matchMedia to simulate mobile viewport (375px)
 beforeEach(() => {
@@ -44,7 +54,7 @@ describe("SubscribeForm mobile layout", () => {
     );
 
     const groups = document.querySelectorAll(".subscribe-form .form-group");
-    expect(groups.length).toBe(3);
+    expect(groups.length).toBe(4);
 
     const btn = screen.getByRole("button", { name: /subscribe/i });
     const btnWidth = parseFloat(getComputedStyle(btn).width);

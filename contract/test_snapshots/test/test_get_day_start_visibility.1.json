@@ -1867,6 +1867,9 @@
                 "symbol": "get_day_start"
               }
             ],
+            "data": {
+              "bool": false
+            }
             "data": "void"
           }
         }
@@ -2049,6 +2052,9 @@
                 "symbol": "get_day_start"
               }
             ],
+            "data": {
+              "bool": false
+            }
             "data": "void"
           }
         }
@@ -2321,6 +2327,7 @@
               }
             ],
             "data": {
+              "bool": true
               "u64": 0
             }
           }
@@ -2489,6 +2496,9 @@
                 "symbol": "get_day_start"
               }
             ],
+            "data": {
+              "bool": false
+            }
             "data": "void"
           }
         }
