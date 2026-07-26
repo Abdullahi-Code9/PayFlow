@@ -33,7 +33,14 @@ pub fn require_valid_amount(env: &Env, new_amount: i128) {
 }
 
 pub fn require_valid_interval(env: &Env, new_interval: u64) {
-    if new_interval == 0 {
+    validate_interval(env, new_interval);
+}
+
+pub fn validate_interval(env: &Env, interval: u64) {
+    if interval == 0 {
+        env.panic_with_error(ContractError::IntervalMustBePositive);
+    }
+    if interval < crate::min_interval::get_min_interval(env) {
         env.panic_with_error(ContractError::IntervalTooShort);
     }
 }

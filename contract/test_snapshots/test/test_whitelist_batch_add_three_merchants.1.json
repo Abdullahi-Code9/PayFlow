@@ -259,7 +259,7 @@
             },
             "ext": "v0"
           },
-          4095
+          1555200
         ]
       ],
       [
@@ -304,7 +304,7 @@
             },
             "ext": "v0"
           },
-          4095
+          1555200
         ]
       ],
       [
@@ -349,7 +349,181 @@
             },
             "ext": "v0"
           },
-          4095
+          1555200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "WhitelistIndex"
+                },
+                {
+                  "u32": 0
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "WhitelistIndex"
+                    },
+                    {
+                      "u32": 0
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          1555200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "WhitelistIndex"
+                },
+                {
+                  "u32": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "WhitelistIndex"
+                    },
+                    {
+                      "u32": 1
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          1555200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "WhitelistIndex"
+                },
+                {
+                  "u32": 2
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "WhitelistIndex"
+                    },
+                    {
+                      "u32": 2
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          1555200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "WhitelistIndexSize"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "WhitelistIndexSize"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u32": 3
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          1555200
         ]
       ],
       [
