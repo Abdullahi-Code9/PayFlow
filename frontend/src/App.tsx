@@ -22,6 +22,8 @@ import { useSubscriberCount } from "./hooks/useSubscriberCount";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useRegisterShortcuts } from "./context/ShortcutRegistry";
 import { useAnalytics } from "./hooks/useAnalytics";
+import { useNetworkStatus } from "./hooks/useNetworkStatus";
+import OfflineBanner from "./components/OfflineBanner";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -159,6 +161,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showRpcSettings, setShowRpcSettings] = useState(false);
   const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
+  const isOnline = useNetworkStatus();
   const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const merchantErrorBoundaryRef = useRef<ErrorBoundary>(null);
@@ -247,6 +250,9 @@ export default function App() {
       {showHelp && publicKey && (
         <ShortcutHelpOverlay shortcuts={shortcuts} onClose={() => setShowHelp(false)} />
       )}
+
+      {/* Offline banner — shown when navigator.onLine is false */}
+      <OfflineBanner visible={!isOnline} />
 
       {/* Contract ID error */}
       {!contractIdValid && contractIdError && (
