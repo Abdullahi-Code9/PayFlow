@@ -955,3 +955,87 @@ export async function parseSubscriptionRepairedEvent(txHash: string): Promise<nu
     return null;
   }
 }
+
+// ── TTL / Archived-state helpers ──────────────────────────────────────────────
+
+/**
+ * Soroban RPC error codes and message patterns that indicate a contract entry
+ * has been archived by the network's state-expiry mechanism.
+ *
+ * The canonical indicator is error code -32700 ("entryExpired") or the string
+ * "archived" appearing in the RPC error message.  Both are treated identically
+ * from the UI's perspective: the user must call `extend_subscription_ttl`.
+ */
+const ARCHIVED_ERROR_PATTERNS = [
+  /entryexpired/i,
+  /entry.*expired/i,
+  /archived/i,
+  /ttl.*expired/i,
+  /state.*expir/i,
+  /-32700/,
+] as const;
+
+/**
+ * Returns true when an error message or object originates from a Soroban RPC
+ * "entry archived / TTL expired" condition.
+ */
+export function isArchivedError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : JSON.stringify(err ?? "");
+
+  return ARCHIVED_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
+}
+
+/**
+ * Builds a transaction that calls `extend_subscription_ttl(subscriber)` on the
+ * contract.  The transaction can be signed by anyone — no admin auth is needed.
+ *
+ * @param callerPublicKey - The Stellar public key used to build/fund the tx (can be the user themselves)
+ * @param subscriberAddress - The subscriber whose persistent storage entry should be extended
+ * @returns XDR-encoded transaction ready for signing
+ */
+export async function buildExtendSubscriptionTtlTx(
+  callerPublicKey: string,
+  subscriberAddress: string
+): Promise<string> {
+  return buildTx(callerPublicKey, "extend_subscription_ttl", [addressVal(subscriberAddress)]);
+}
+
+/**
+ * Estimates the fee (in stroops) for an `extend_subscription_ttl` call by
+ * running a simulation and reading back the min-resource-fee.
+ *
+ * Returns `null` when the simulation cannot be completed (e.g. RPC unavailable).
+ */
+export async function estimateExtendTtlFee(
+  callerPublicKey: string,
+  subscriberAddress: string
+): Promise<bigint | null> {
+  try {
+    const account = await server.getAccount(callerPublicKey);
+    const contract = new Contract(CONTRACT_ID);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(contract.call("extend_subscription_ttl", addressVal(subscriberAddress)))
+      .setTimeout(30)
+      .build();
+
+    const simResult = await server.simulateTransaction(tx);
+    if ("error" in simResult) return null;
+
+    // The minResourceFee field is returned as a string by the RPC
+    const minFee = (simResult as { minResourceFee?: string }).minResourceFee;
+    if (minFee) return BigInt(minFee);
+
+    return null;
+  } catch {
+    return null;
+  }
+}
