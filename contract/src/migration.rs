@@ -21,12 +21,12 @@ pub struct SubscriptionV1 {
 #[allow(dead_code)]
 pub const CURRENT_VERSION: u32 = 2;
 
-/// Returns the stored schema version, defaulting to 1 (pre-versioning).
+/// Returns the stored schema version, defaulting to 0 (unmigrated).
 pub fn get_schema_version(env: &Env) -> u32 {
     env.storage()
         .instance()
         .get(&DataKey::SchemaVersion)
-        .unwrap_or(1u32)
+        .unwrap_or(0u32)
 }
 
 /// Writes the current schema version to instance storage.

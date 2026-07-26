@@ -30,6 +30,7 @@ use soroban_sdk::{
 };
 
 pub use batch::ChargeResult;
+pub use charge_exec::ChargeSimResult;
 
 // ─────────────────────────────────────────────────────────────
 // Storage keys
@@ -368,6 +369,18 @@ impl FlowPay {
     /// No auth required — safe for keeper bots to call for dormant subscribers.
     pub fn bump_subscription(env: Env, user: Address) {
         extend_subscription_ttl(&env, &user);
+    }
+
+    /// Bumps TTL for multiple subscription entries in a single call.
+    /// Returns a list of addresses whose TTLs were actually extended.
+    pub fn batch_extend_subscription_ttl(env: Env, users: Vec<Address>) -> Vec<Address> {
+        batch::batch_extend_subscription_ttl(&env, users)
+    }
+
+    /// Dry-run simulation of a charge call. Returns ChargeSimResult variant indicating
+    /// whether charge would succeed or the reason it would fail.
+    pub fn simulate_charge(env: Env, user: Address) -> ChargeSimResult {
+        charge_exec::simulate_charge(&env, user)
     }
 
     /// Executes an immediate pay-per-use charge for an active subscription.
@@ -1514,11 +1527,15 @@ fn pay_per_use_inner(env: &Env, user: Address, amount: i128, recipient: Option<A
     let is_pay_per_use_to = recipient.is_some();
     let recipient = recipient.unwrap_or_else(|| sub.merchant.clone());
 
-    if is_pay_per_use_to
-        && whitelist::is_whitelist_enabled(env)
-        && !whitelist::is_whitelisted(env, &recipient)
-    {
-        env.panic_with_error(ContractError::MerchantNotWhitelisted);
+    if is_pay_per_use_to {
+        if recipient == env.current_contract_address() {
+            env.panic_with_error(ContractError::InvalidRecipient);
+        }
+        if whitelist::is_whitelist_enabled(env)
+            && !whitelist::is_whitelisted(env, &recipient)
+        {
+            env.panic_with_error(ContractError::MerchantNotWhitelisted);
+        }
     }
 
     spending_limit::enforce_limit(env, &user, amount);
