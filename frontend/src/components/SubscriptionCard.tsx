@@ -19,9 +19,13 @@ import React, { useEffect, useState } from "react";
 import CopyButton from "./CopyButton";
 import NextChargeCountdown from "./NextChargeCountdown";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
+import ErrorRecovery from "./ErrorRecovery";
+import SubscriptionHealthWidget from "./SubscriptionHealthWidget";
 import { Subscription } from "../types";
 import { BILLING_INTERVALS } from "../constants";
 import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
+import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
+import { getAllowance, buildCancelTx } from "../stellar";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
@@ -50,6 +54,25 @@ function formatInterval(secs: number): string {
   if (secs >= weekly) return `${Math.round(secs / weekly)}w`;
   if (secs >= daily) return `${Math.round(secs / daily)}d`;
   return `${secs}s`;
+}
+
+function formatTrialStatus(
+  trial_duration: number,
+  last_charged: number
+): { isInTrial: boolean; trialEndDate: string; trialDaysRemaining: number } {
+  if (trial_duration === 0) {
+    return { isInTrial: false, trialEndDate: "", trialDaysRemaining: 0 };
+  }
+  const trialEndTimestamp = last_charged + trial_duration;
+  const now = Math.floor(Date.now() / 1000);
+  const isInTrial = now < trialEndTimestamp;
+  const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
+  const trialDaysRemaining = Math.max(
+    0,
+    Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60))
+  );
+
+  return { isInTrial, trialEndDate, trialDaysRemaining };
 }
 
 /**
@@ -200,6 +223,9 @@ export default function SubscriptionCard({
   const { merchant, amount, interval, last_charged, active, paused } = subscription;
   const { displayCurrentAmount } = useAmountDisplay();
 
+  const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
+  const { mutate } = useSubscriptionSync(userKey);
+  const { isMobile } = useResponsive();
   const nextChargeTimestamp = last_charged + interval;
   const formattedAmount = displayCurrentAmount(amount);
 
@@ -210,6 +236,12 @@ export default function SubscriptionCard({
 
   // ── Pause / resume via hook ────────────────────────────────────────────────
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
+  const [cancelLoading, setCancelLoading] = React.useState(false);
+  const [cancelStatus, setCancelStatus] = React.useState("");
+
+  // ── Pause / resume via hook ────────────────────────────────────────────────
+  const [showPauseConfirm, setShowPauseConfirm] = React.useState(false);
   const { pause, resume, pauseTx, resumeTx } = usePauseResume(userKey, onSign, onRefresh);
 
   // ── Allowance health state ─────────────────────────────────────────────────
@@ -301,6 +333,23 @@ export default function SubscriptionCard({
       // resumeTx.error holds the failure reason
     }
   };
+
+  // ── Allowance health state ─────────────────────────────────────────────────
+  const [allowance, setAllowance] = useState<bigint | null>(null);
+  const [allowanceLoading, setAllowanceLoading] = useState(true);
+  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+
+  const amountBigInt = BigInt(amount);
+  const health = computeAllowanceHealth(allowance, amountBigInt);
+
+  useEffect(() => {
+    if (!active) return; // no point checking allowance on cancelled subs
+    setAllowanceLoading(true);
+    getAllowance(userKey)
+      .then((val) => setAllowance(val))
+      .catch(() => setAllowance(null)) // RPC error → "unknown" state
+      .finally(() => setAllowanceLoading(false));
+  }, [userKey, active]);
 
   let derivedPauseStatus = "";
   if (pauseTx.state === "pending") {
@@ -474,6 +523,9 @@ export default function SubscriptionCard({
         />
       )}
 
+      {/* Subscription Health Widget */}
+      <SubscriptionHealthWidget userKey={userKey} />
+
       {(derivedPauseStatus || cancelStatus) && (
         <p
           className="form-status"
@@ -486,6 +538,10 @@ export default function SubscriptionCard({
         >
           {derivedPauseStatus || cancelStatus}
         </p>
+      )}
+
+      {(derivedPauseStatus.startsWith("Error") || cancelStatus.startsWith("Error")) && (
+        <ErrorRecovery error={derivedPauseStatus.startsWith("Error") ? pauseTx.error || resumeTx.error : cancelStatus} />
       )}
     </div>
   );

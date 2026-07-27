@@ -5,6 +5,7 @@ import { STROOPS_PER_XLM } from "../constants";
 import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import Spinner from "./Spinner";
 import CopyButton from "./CopyButton";
+import { ChargeHistorySkeleton } from "./Skeleton";
 
 interface Props {
   userKey: string;
@@ -135,9 +136,11 @@ export default function SubscriptionHistory({ userKey }: Props) {
   if (!hasData && loading) {
     return (
       <div className="card" aria-busy="true" aria-label="Loading charge history">
-        <h3 className="subscription-card__title">Charge History</h3>
-        <div style={{ padding: "var(--space-4) 0", textAlign: "center" }}>
-          <Spinner />
+        <h3 className="subscription-card__title" style={{ marginBottom: "var(--space-4)" }}>Charge History</h3>
+        <div className="charge-history-list" role="list">
+          <ChargeHistorySkeleton />
+          <ChargeHistorySkeleton />
+          <ChargeHistorySkeleton />
         </div>
       </div>
     );

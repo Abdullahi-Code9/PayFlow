@@ -16,6 +16,9 @@ import { useVirtualList } from "../hooks/useVirtualList";
 import { useResponsive } from "../hooks/useResponsive";
 import CopyButton from "./CopyButton";
 import RevenueSparkline from "./RevenueSparkline";
+import { MerchantSubscriberSkeleton } from "./Skeleton";
+import ErrorRecovery from "./ErrorRecovery";
+
 
 const SUBSCRIBER_ROW_HEIGHT = 72;
 const SUBSCRIBER_LIST_HEIGHT = 400;
@@ -109,7 +112,19 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
   if (loading) {
     return (
       <div className="dashboard">
-        <p className="text-muted">Loading merchant subscribers…</p>
+        <div className="flex-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold">Merchant Dashboard</h2>
+            <p className="text-sm text-muted">Manage your subscribers and track your revenue.</p>
+          </div>
+        </div>
+        <div className="card merchant-subscriber-card">
+          <div className="subscription-rows merchant-subscriber-list">
+            <MerchantSubscriberSkeleton />
+            <MerchantSubscriberSkeleton />
+            <MerchantSubscriberSkeleton />
+          </div>
+        </div>
       </div>
     );
   }
@@ -140,16 +155,13 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
       </div>
 
       {error && (
-        <p className="action-status mb-4" style={{ color: "var(--color-danger)" }}>
-          Error: {error}
-        </p>
+        <ErrorRecovery error={error} />
       )}
 
       {tx.error && (
-        <p className="action-status mb-4" style={{ color: "var(--color-danger)" }}>
-          Transaction Error: {tx.error}
-        </p>
+        <ErrorRecovery error={tx.error} />
       )}
+
 
       {subscribers.length === 0 ? (
         <div className="card">

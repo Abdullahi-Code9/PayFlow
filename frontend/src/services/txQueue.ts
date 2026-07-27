@@ -6,6 +6,8 @@
  * the queue changes.  The panel auto-opens on a new submission.
  */
 
+import { useState, useEffect } from "react";
+
 export type TxEntryStatus = "pending" | "submitted" | "confirmed" | "failed";
 
 export interface TxEntry {
@@ -128,6 +130,7 @@ export function _reset(): void {
 // ---------------------------------------------------------------------------
 // Queue serialization helpers (used by useTransaction)
 // ---------------------------------------------------------------------------
+// ── Simple promise-serialisation queue (used by useTransaction) ────────────────
 
 type PromiseReturningCallback<T> = () => Promise<T>;
 
@@ -140,6 +143,11 @@ const queueStateListeners = new Set<QueueStateListener>();
 
 function notifyQueueState() {
   for (const listener of queueStateListeners) {
+type QueueListener = () => void;
+const queueListeners = new Set<QueueListener>();
+
+function notifyQueue() {
+  for (const listener of queueListeners) {
     listener();
   }
 }
@@ -153,6 +161,7 @@ export function enqueueTransaction<T>(
     pendingLabel = label;
   }
   notifyQueueState();
+  notifyQueue();
 
   const currentPromise = queuePromise;
 
@@ -160,6 +169,7 @@ export function enqueueTransaction<T>(
     currentPromise.finally(async () => {
       pendingLabel = label;
       notifyQueueState();
+      notifyQueue();
 
       try {
         const result = await buildAndSign();
@@ -172,6 +182,7 @@ export function enqueueTransaction<T>(
           pendingLabel = null;
         }
         notifyQueueState();
+        notifyQueue();
       }
     });
   });
@@ -195,6 +206,9 @@ export function useTxQueue() {
     queueStateListeners.add(listener);
     return () => {
       queueStateListeners.delete(listener);
+    queueListeners.add(listener);
+    return () => {
+      queueListeners.delete(listener);
     };
   }, []);
 
