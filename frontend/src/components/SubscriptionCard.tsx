@@ -20,12 +20,13 @@ import CopyButton from "./CopyButton";
 import NextChargeCountdown from "./NextChargeCountdown";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import { Subscription } from "../types";
-import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
+import { BILLING_INTERVALS } from "../constants";
 import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 import { useResponsive } from "../hooks/useResponsive";
+import { useAmountDisplay } from "../hooks/useAmountDisplay";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -197,9 +198,10 @@ export default function SubscriptionCard({
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
   const { merchant, amount, interval, last_charged, active, paused } = subscription;
+  const { displayCurrentAmount } = useAmountDisplay();
 
   const nextChargeTimestamp = last_charged + interval;
-  const xlm = (Number(amount) / STROOPS_PER_XLM).toFixed(2);
+  const formattedAmount = displayCurrentAmount(amount);
 
   // ── Cancel state ───────────────────────────────────────────────────────────
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -358,7 +360,7 @@ export default function SubscriptionCard({
             <CopyButton text={merchant} ariaLabel="Copy merchant address" />
           </div>
         </div>
-        <StackedRow label="Amount" value={`${xlm} XLM`} isMobile={isMobile} />
+        <StackedRow label="Amount" value={formattedAmount} isMobile={isMobile} />
         <StackedRow label="Interval" value={formatInterval(interval)} isMobile={isMobile} />
         <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
           <span className="subscription-row__label">

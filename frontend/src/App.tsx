@@ -24,6 +24,7 @@ import { useRegisterShortcuts } from "./context/ShortcutRegistry";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import OfflineBanner from "./components/OfflineBanner";
+import AmountUnitToggle from "./components/AmountUnitToggle";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -225,7 +226,9 @@ export default function App() {
             )}
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {/* Amount unit toggle — switches all amount displays between XLM and STROOP */}
+          <AmountUnitToggle />
           {publicKey && (
             <button
               className="btn-secondary theme-toggle"

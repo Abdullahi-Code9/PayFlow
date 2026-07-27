@@ -8,7 +8,8 @@ import {
   getMerchantRevenue,
   getMerchantRevenueHistory,
 } from "../stellar";
-import { formatAddress, formatXlm } from "../utils/format";
+import { formatAddress } from "../utils/format";
+import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import { usePolling } from "../hooks/usePolling";
 import { useTransaction } from "../hooks/useTransaction";
 import { useVirtualList } from "../hooks/useVirtualList";
@@ -39,6 +40,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
 
   const tx = useTransaction();
   const { isMobile } = useResponsive();
+  const { displayCurrentAmount } = useAmountDisplay();
   const [outcomes, setOutcomes] = useState<Record<string, BatchChargeOutcome>>({});
 
   const dueSubscribers = subscribers.filter((s) => s.nextChargeAt <= Math.floor(Date.now() / 1000));
@@ -129,7 +131,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
       <div className={`merchant-stats-grid grid gap-4 mb-6${isMobile ? " grid-cols-1" : " grid-cols-2"}`}>
         <div className="card">
           <span className="text-sm text-muted block mb-1">Total Revenue</span>
-          <span className="text-2xl font-bold">{formatXlm(revenue)}</span>
+          <span className="text-2xl font-bold">{displayCurrentAmount(revenue)}</span>
         </div>
         <div className="card">
           <span className="text-sm text-muted block mb-2">Last 7 Days Revenue</span>
@@ -215,7 +217,7 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
                       <CopyButton text={entry.subscriber} />
                     </div>
                     <div className="merchant-subscriber-value">
-                      <span className="subscription-row__value">{formatXlm(entry.amount)}</span>
+                      <span className="subscription-row__value">{displayCurrentAmount(entry.amount)}</span>
                       <div className="merchant-subscriber-meta-right">
                         <span className="subscription-row__label">
                           Next charge {formatNextCharge(entry.nextChargeAt)}

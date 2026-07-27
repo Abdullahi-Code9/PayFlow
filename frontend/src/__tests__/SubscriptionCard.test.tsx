@@ -461,7 +461,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(screen.getByText("5.00 XLM")).toBeInTheDocument();
+      expect(screen.getByText("5.0000000 XLM")).toBeInTheDocument();
     });
 
     it("renders amount with correct decimal formatting", () => {
@@ -474,7 +474,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(screen.getByText("12.35 XLM")).toBeInTheDocument();
+      expect(screen.getByText("12.3456789 XLM")).toBeInTheDocument();
     });
   });
 
