@@ -36,7 +36,6 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     env.storage().persistent().set(&size_key, &(size + 1));
     env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
 
-        .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
     merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);
 }
@@ -95,7 +94,6 @@ pub fn get_whitelist_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
 }
 
 
-/// Checks if the merchant whitelist is currently enabled.
 /// Checks if the merchant whitelist is currently enabled. Defaults to true.
 pub fn is_whitelist_enabled(env: &Env) -> bool {
     env.storage()
