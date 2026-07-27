@@ -13,3 +13,22 @@ pub fn get_trial_end(env: Env, user: Address) -> Option<u64> {
         None
     }
 }
+
+pub fn extend_trial(env: &Env, user: &Address, additional_seconds: u64) {
+    if additional_seconds == 0 {
+        env.panic_with_error(crate::errors::ContractError::IntervalMustBePositive);
+    }
+
+    let mut sub = storage::get_subscription(env, user)
+        .unwrap_or_else(|| env.panic_with_error(crate::errors::ContractError::NoSubscriptionFound));
+
+    if !sub.active {
+        env.panic_with_error(crate::errors::ContractError::SubscriptionInactive);
+    }
+
+    sub.last_charged = sub.last_charged.checked_add(additional_seconds).unwrap();
+
+    storage::set_subscription(env, user, &sub);
+
+    crate::events::publish_trial_extended(env, user, additional_seconds, sub.last_charged);
+}

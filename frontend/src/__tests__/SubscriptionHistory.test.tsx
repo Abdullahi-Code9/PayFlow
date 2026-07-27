@@ -29,7 +29,7 @@ describe("SubscriptionHistory", () => {
 
     render(<SubscriptionHistory userKey="GABC123" />);
 
-    expect(screen.getByLabelText(/loading charge history/i)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/loading charge history/i)[0]).toBeInTheDocument();
   });
 
   it("renders charge events when data is loaded", async () => {

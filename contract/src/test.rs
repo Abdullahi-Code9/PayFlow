@@ -600,7 +600,7 @@ fn test_subscribe_to_frozen_merchant_panics() {
         storage::set_admin(&env, &admin);
     });
 
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
     client.subscribe(
         &user,
         &merchant,
@@ -635,7 +635,7 @@ fn test_charge_succeeds_after_merchant_frozen() {
         &None,
     );
 
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
     assert!(client.is_merchant_frozen(&merchant));
 
     env.ledger().with_mut(|l| {
@@ -669,7 +669,7 @@ fn test_pay_per_use_succeeds_after_merchant_frozen() {
         &None,
     );
 
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
 
     client.pay_per_use(&user, &1_0000000);
 
@@ -689,7 +689,7 @@ fn test_is_merchant_frozen_reflects_state() {
 
     assert!(!client.is_merchant_frozen(&merchant));
 
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
     assert!(client.is_merchant_frozen(&merchant));
 
     client.unfreeze_merchant(&merchant);
@@ -711,7 +711,7 @@ fn test_freeze_merchant_independent_of_whitelist() {
     // Merchant is not whitelisted at all, and whitelist enforcement is off.
     assert!(!client.is_merchant_whitelisted(&merchant));
 
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
     assert!(client.is_merchant_frozen(&merchant));
     assert!(!client.is_merchant_whitelisted(&merchant));
 }
@@ -727,8 +727,8 @@ fn test_freeze_merchant_idempotent() {
         storage::set_admin(&env, &admin);
     });
 
-    client.freeze_merchant(&merchant);
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
+    client.freeze_merchant(&merchant, &None);
     assert!(client.is_merchant_frozen(&merchant));
 }
 
@@ -755,7 +755,7 @@ fn test_freeze_merchant_non_admin_panics() {
     let client = FlowPayClient::new(&env, &contract_id);
 
     // No admin configured â€” require_admin panics with "admin not set"
-    client.freeze_merchant(&merchant);
+    client.freeze_merchant(&merchant, &None);
 }
 
 /// unfreeze_merchant requires admin auth.

@@ -36,7 +36,6 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     env.storage().persistent().set(&size_key, &(size + 1));
     env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
 
-        .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
     merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);
 }
@@ -95,7 +94,6 @@ pub fn get_whitelist_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
 }
 
 
-/// Checks if the merchant whitelist is currently enabled.
 /// Checks if the merchant whitelist is currently enabled. Defaults to true.
 pub fn is_whitelist_enabled(env: &Env) -> bool {
     env.storage()
@@ -124,7 +122,16 @@ pub fn is_frozen(env: &Env, merchant: &Address) -> bool {
 }
 
 /// Freezes a merchant, blocking new subscriptions. Idempotent.
-pub fn freeze(env: &Env, merchant: &Address) {
+pub fn freeze(env: &Env, merchant: &Address, reason: Option<soroban_sdk::String>) {
+    if let Some(r) = &reason {
+        if r.len() > 128 {
+            env.panic_with_error(crate::errors::ContractError::MetadataLabelTooLong);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::MerchantFreezeReason(merchant.clone()), r);
+    }
+    
     env.storage()
         .persistent()
         .set(&DataKey::MerchantFrozen(merchant.clone()), &true);
@@ -137,5 +144,14 @@ pub fn unfreeze(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::MerchantFrozen(merchant.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::MerchantFreezeReason(merchant.clone()));
     events::publish_merchant_unfrozen(env, merchant);
+}
+
+pub fn get_freeze_reason(env: &Env, merchant: &Address) -> Option<soroban_sdk::String> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MerchantFreezeReason(merchant.clone()))
 }

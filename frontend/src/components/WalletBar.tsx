@@ -5,12 +5,16 @@ import NetworkBadge from "./NetworkBadge";
 import BalanceDisplay from "./BalanceDisplay";
 import { useTxQueue } from "../services/txQueue";
 
+import { WalletAdapter } from "../services/wallets/WalletAdapter";
+
 interface WalletBarProps {
   publicKey: string;
+  activeAdapter: WalletAdapter | null;
   onDisconnect: () => void;
 }
 
-export default function WalletBar({ publicKey, onDisconnect }: WalletBarProps) {
+export default function WalletBar({ publicKey, activeAdapter, onDisconnect }: WalletBarProps) {
+
   const { queueDepth } = useTxQueue();
 
   return (
@@ -22,7 +26,9 @@ export default function WalletBar({ publicKey, onDisconnect }: WalletBarProps) {
           </div>
         )}
         <div className="wallet-bar__connection">
-          <span className="wallet-bar__label">Connected</span>
+          <span className="wallet-bar__label">
+            Connected via {activeAdapter ? `${activeAdapter.icon} ${activeAdapter.name}` : "Wallet"}
+          </span>
           <div className="wallet-bar__address-row">
             <span className="wallet-bar__address">{formatAddress(publicKey)}</span>
             <CopyButton text={publicKey} ariaLabel="Copy wallet address" />

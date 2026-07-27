@@ -108,6 +108,30 @@ pub fn publish_cancelled_with_refund(env: &Env, user: &Address, refund_amount: i
 
 #[soroban_sdk::contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrialExtendedEventData {
+    pub additional_seconds: u64,
+    pub new_last_charged: u64,
+    pub ledger_sequence: u32,
+}
+
+pub fn publish_trial_extended(
+    env: &Env,
+    user: &Address,
+    additional_seconds: u64,
+    new_last_charged: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "trial_extended"), user.clone()),
+        TrialExtendedEventData {
+            additional_seconds,
+            new_last_charged,
+            ledger_sequence: env.ledger().sequence(),
+        },
+    );
+}
+
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MinIntervalSetEventData {
     pub old: u64,
     pub new: u64,
@@ -118,15 +142,6 @@ pub fn publish_min_interval_set(env: &Env, old: u64, new: u64) {
         (Symbol::new(env, "min_interval_set"),),
         MinIntervalSetEventData { old, new },
     );
-}
-
-pub fn emit_min_interval_set(env: &Env, old: u64, new: u64) {
-    publish_min_interval_set(env, old, new);
-}
-
-pub fn publish_min_interval_updated(env: &Env, seconds: u64) {
-    env.events()
-        .publish((Symbol::new(env, "min_interval"),), seconds);
 }
 
 pub fn publish_merchant_history_cleared(env: &Env, merchant: &Address) {
