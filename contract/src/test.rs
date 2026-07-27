@@ -6584,3 +6584,91 @@ fn test_daily_spent_reset() {
     
     assert!(client.get_day_start(&user).is_none());
 }
+
+// ─────────────────────────────────────────────────────────────
+// CONTRACT-12: get_merchant_sub_counts batch tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_merchant_sub_counts_batch_multiple_merchants() {
+    let (env, contract_id, token_addr, user_a, merchant_a) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let merchant_b = Address::generate(&env);
+    let merchant_c = Address::generate(&env);
+
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+    let user_d = Address::generate(&env);
+
+    let sac = StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&user_b, &10_000_0000000);
+    sac.mint(&user_c, &10_000_0000000);
+    sac.mint(&user_d, &10_000_0000000);
+    let token = TokenClient::new(&env, &token_addr);
+    token.approve(&user_b, &contract_id, &10_000_0000000, &200);
+    token.approve(&user_c, &contract_id, &10_000_0000000, &200);
+    token.approve(&user_d, &contract_id, &10_000_0000000, &200);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    // merchant_a: 2 subscribers (user_a, user_b)
+    client.subscribe(&user_a, &merchant_a, &amount, &interval, &token_addr, &None, &None);
+    client.subscribe(&user_b, &merchant_a, &amount, &interval, &token_addr, &None, &None);
+    // merchant_b: 1 subscriber (user_c)
+    client.subscribe(&user_c, &merchant_b, &amount, &interval, &token_addr, &None, &None);
+    // merchant_c: 1 subscriber (user_d)
+    client.subscribe(&user_d, &merchant_c, &amount, &interval, &token_addr, &None, &None);
+
+    let merchants = soroban_sdk::vec![&env, merchant_a.clone(), merchant_b.clone(), merchant_c.clone()];
+    let results = client.get_merchant_sub_counts(&merchants);
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results.get_unchecked(0), (merchant_a.clone(), 2u32));
+    assert_eq!(results.get_unchecked(1), (merchant_b.clone(), 1u32));
+    assert_eq!(results.get_unchecked(2), (merchant_c.clone(), 1u32));
+}
+
+#[test]
+fn test_merchant_sub_counts_batch_unknown_merchant_returns_zero() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let unknown = Address::generate(&env);
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+
+    let merchants = soroban_sdk::vec![&env, merchant.clone(), unknown.clone()];
+    let results = client.get_merchant_sub_counts(&merchants);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results.get_unchecked(0), (merchant, 1u32));
+    assert_eq!(results.get_unchecked(1), (unknown, 0u32));
+}
+
+#[test]
+fn test_merchant_sub_counts_batch_over_limit_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let mut merchants: Vec<Address> = Vec::new(&env);
+    for _ in 0..51 {
+        merchants.push_back(Address::generate(&env));
+    }
+
+    let result = client.try_get_merchant_sub_counts(&merchants);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_merchant_sub_counts_batch_empty_input() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let merchants: Vec<Address> = Vec::new(&env);
+    let results = client.get_merchant_sub_counts(&merchants);
+    assert_eq!(results.len(), 0);
+}
