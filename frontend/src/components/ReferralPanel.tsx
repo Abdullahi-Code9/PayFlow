@@ -128,7 +128,7 @@ export default function ReferralPanel({ publicKey }: Props) {
 
     setLoadingCount(true);
     fetchEvents("referred", publicKey)
-      .then((events) => {
+      .then(({ events }) => {
         // Each 'referred' event where topic[1] === publicKey means this user
         // referred someone. Count unique referred addresses.
         const uniqueReferees = new Set(

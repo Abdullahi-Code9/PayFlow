@@ -127,6 +127,9 @@ export function _reset(): void {
   listeners.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Queue serialization helpers (used by useTransaction)
+// ---------------------------------------------------------------------------
 // ── Simple promise-serialisation queue (used by useTransaction) ────────────────
 
 type PromiseReturningCallback<T> = () => Promise<T>;
@@ -135,6 +138,11 @@ let queuePromise: Promise<void> = Promise.resolve();
 let pendingLabel: string | null = null;
 let queueDepth = 0;
 
+type QueueStateListener = () => void;
+const queueStateListeners = new Set<QueueStateListener>();
+
+function notifyQueueState() {
+  for (const listener of queueStateListeners) {
 type QueueListener = () => void;
 const queueListeners = new Set<QueueListener>();
 
@@ -152,6 +160,7 @@ export function enqueueTransaction<T>(
   if (!pendingLabel) {
     pendingLabel = label;
   }
+  notifyQueueState();
   notifyQueue();
 
   const currentPromise = queuePromise;
@@ -159,6 +168,7 @@ export function enqueueTransaction<T>(
   const nextPromise = new Promise<T>((resolve, reject) => {
     currentPromise.finally(async () => {
       pendingLabel = label;
+      notifyQueueState();
       notifyQueue();
 
       try {
@@ -171,6 +181,7 @@ export function enqueueTransaction<T>(
         if (queueDepth === 0) {
           pendingLabel = null;
         }
+        notifyQueueState();
         notifyQueue();
       }
     });
@@ -181,11 +192,20 @@ export function enqueueTransaction<T>(
   return nextPromise;
 }
 
+// ---------------------------------------------------------------------------
+// React hook for consuming queue depth / pending label in UI components
+// ---------------------------------------------------------------------------
+
+import { useState, useEffect } from "react";
+
 export function useTxQueue() {
   const [state, setState] = useState({ pendingLabel, queueDepth });
 
   useEffect(() => {
     const listener = () => setState({ pendingLabel, queueDepth });
+    queueStateListeners.add(listener);
+    return () => {
+      queueStateListeners.delete(listener);
     queueListeners.add(listener);
     return () => {
       queueListeners.delete(listener);

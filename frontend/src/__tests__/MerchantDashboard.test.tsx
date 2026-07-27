@@ -12,6 +12,7 @@ vi.mock("../components/CopyButton", () => ({
     <button aria-label={ariaLabel ?? "Copy"}>Copy</button>
   ),
 }));
+
 vi.mock("../hooks/useTransaction", () => ({
   useTransaction: vi.fn(() => ({
     status: "idle",
