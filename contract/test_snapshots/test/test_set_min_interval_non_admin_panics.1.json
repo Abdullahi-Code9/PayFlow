@@ -79,6 +79,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -207,7 +208,20 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistEnabled"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      }
+                    ]
                   }
                 }
               }
@@ -910,7 +924,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'admin not set' from contract function 'Symbol(obj#203)'"
+                  "string": "caught panic 'admin not set' from contract function 'Symbol(obj#209)'"
                 },
                 {
                   "u64": 7200

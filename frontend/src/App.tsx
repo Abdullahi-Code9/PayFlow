@@ -14,8 +14,8 @@ import { useTheme } from "./hooks/useTheme";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useResponsive } from "./hooks/useResponsive";
 import { useAccessibility } from "./hooks/useAccessibility";
-import { useFreighterAvailable } from "./hooks/useFreighterAvailable";
 import { useNetworkCheck } from "./hooks/useNetworkCheck";
+
 import { useContractId } from "./hooks/useContractId";
 import { useRpcHealth } from "./hooks/useRpcHealth";
 import { useSubscriberCount } from "./hooks/useSubscriberCount";
@@ -33,6 +33,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import TxQueuePanel from "./components/TxQueuePanel";
 import SubscriptionCardSkeleton from "./components/Skeleton";
 import ShortcutHelpOverlay from "./components/ShortcutHelpOverlay";
+import WalletSelectModal from "./components/WalletSelectModal";
+import { AVAILABLE_WALLETS } from "./hooks/useWallet";
+import { WalletAdapter } from "./services/wallets/WalletAdapter";
+
 import RpcSettings from "./components/RpcSettings";
 
 // Lazy-loaded components — split into separate chunks to keep the main bundle lean.
@@ -137,9 +141,9 @@ function TabErrorFallback({ title, onRetry }: { title: string; onRetry: () => vo
 }
 
 export default function App() {
-  const { publicKey, connect, signAndSubmit, disconnect, error, connecting } = useWallet();
+  const { publicKey, connect, signAndSubmit, disconnect, error, connecting, activeAdapter } = useWallet();
   const { theme, toggle } = useTheme();
-  const { available: freighterAvailable, installUrl } = useFreighterAvailable();
+
   const { networkMatch, walletNetwork } = useNetworkCheck();
   const { valid: contractIdValid, error: contractIdError } = useContractId();
   const {
@@ -157,8 +161,10 @@ export default function App() {
   );
   const [refresh, setRefresh] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
   const [showRpcSettings, setShowRpcSettings] = useState(false);
   const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
+
   const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const merchantErrorBoundaryRef = useRef<ErrorBoundary>(null);
@@ -197,10 +203,12 @@ export default function App() {
     enabled: !!publicKey,
   });
 
-  async function handleConnectWallet() {
-    await connect();
+  async function handleConnectWallet(adapter: WalletAdapter) {
+    setShowWalletModal(false);
+    await connect(adapter);
     track({ type: "wallet_connected" });
   }
+
 
   return (
     <div className={`app-shell${isMobile ? " app-shell--mobile" : ""}`}>
@@ -294,23 +302,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Freighter not installed — show install prompt */}
-      {!freighterAvailable && !publicKey && (
-        <div className="card connect-wallet">
-          <p className="connect-wallet__hint">Freighter wallet is required to use FlowPay.</p>
-          <a
-            href={installUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-primary w-full connect-wallet__install-link"
-          >
-            Install Freighter
-          </a>
-        </div>
-      )}
-
-      {/* Freighter installed but not connected */}
-      {freighterAvailable && !publicKey && (
+      {/* Not connected */}
+      {!publicKey && (
         <>
           <div className="card connect-wallet">
             <p className="connect-wallet__hint">
@@ -333,14 +326,23 @@ export default function App() {
               </button>
             </div>
           </div>
-          <ConnectWallet onConnect={handleConnectWallet} error={error} loading={connecting} />
+          <ConnectWallet onConnect={() => setShowWalletModal(true)} error={error} loading={connecting} />
         </>
+      )}
+
+      {showWalletModal && (
+        <WalletSelectModal 
+          adapters={AVAILABLE_WALLETS} 
+          onSelect={handleConnectWallet} 
+          onClose={() => setShowWalletModal(false)} 
+        />
       )}
 
       {/* Connected */}
       {publicKey && (
         <>
-          <WalletBar publicKey={publicKey} onDisconnect={disconnect} />
+          <WalletBar publicKey={publicKey} activeAdapter={activeAdapter} onDisconnect={disconnect} />
+
 
           {/* Tabs */}
           <TabBar

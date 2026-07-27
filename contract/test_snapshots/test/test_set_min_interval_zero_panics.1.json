@@ -80,6 +80,7 @@
       ]
     ],
     [],
+    [],
     []
   ],
   "ledger": {
@@ -219,6 +220,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistEnabled"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
                         }
                       }
                     ]
@@ -971,7 +984,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'min interval must be positive' from contract function 'Symbol(obj#215)'"
+                  "string": "caught panic 'min interval must be positive' from contract function 'Symbol(obj#225)'"
                 },
                 {
                   "u64": 0
