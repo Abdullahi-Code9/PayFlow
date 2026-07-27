@@ -378,6 +378,48 @@ export async function getSubscriptionMetadata(user: string): Promise<string | nu
   }
 }
 
+export interface SubscriptionHealth {
+  charged_up: boolean;
+  allowance_ok: boolean;
+  trial_active: boolean;
+  paused: boolean;
+  charge_due: boolean;
+}
+
+export function getSubscriptionHealth(user: string): Promise<SubscriptionHealth | null> {
+  return dedupedCall(`getSubscriptionHealth:${user}`, async () => {
+    try {
+      const contract = new Contract(CONTRACT_ID);
+      const account = await server.getAccount(user);
+
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("get_subscription_health", addressVal(user)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) throw new Error((result as { error: string }).error);
+
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      if (!retval || retval.switch().name === "scvVoid") return null;
+
+      return ScValDecoder.decodeStruct(retval, {
+        charged_up: ScValDecoder.decodeBool,
+        allowance_ok: ScValDecoder.decodeBool,
+        trial_active: ScValDecoder.decodeBool,
+        paused: ScValDecoder.decodeBool,
+        charge_due: ScValDecoder.decodeBool,
+      });
+    } catch {
+      return null;
+    }
+  });
+}
+
+
 function parseEventValueField(value: any, field: string): string {
   if (!value) return "";
   const base = value._value?.[field] ?? value[field];

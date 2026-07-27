@@ -31,6 +31,10 @@ import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 import { useResponsive } from "../hooks/useResponsive";
 import { buildCancelTx } from "../stellar";
+import ErrorRecovery from "./ErrorRecovery";
+import SubscriptionHealthWidget from "./SubscriptionHealthWidget";
+
+
 
 interface SubscriptionCardProps {
   subscription: Subscription;
@@ -423,6 +427,18 @@ export default function SubscriptionCard({
         </div>
       )}
 
+      {derivedPauseStatus && !derivedPauseStatus.startsWith("Error") && (
+        <p className="form-status" style={{ color: "var(--color-success)" }}>
+          {derivedPauseStatus}
+        </p>
+      )}
+
+      {/* Subscription Health Widget */}
+      <SubscriptionHealthWidget userKey={userKey} />
+
+      {cancelStatus && !cancelStatus.startsWith("Error") && (
+        <p className="form-status" style={{ color: "var(--color-success)" }}>
+          {cancelStatus}
       {/* Increase allowance modal — opened by clicking a warning badge */}
       {showAllowanceModal && (
         <IncreaseAllowanceModal
@@ -462,6 +478,10 @@ export default function SubscriptionCard({
         >
           {derivedPauseStatus || cancelStatus}
         </p>
+      )}
+
+      {(derivedPauseStatus.startsWith("Error") || cancelStatus.startsWith("Error")) && (
+        <ErrorRecovery error={derivedPauseStatus.startsWith("Error") ? pauseTx.error || resumeTx.error : cancelStatus} />
       )}
     </div>
   );
