@@ -162,7 +162,7 @@ pub fn get_top_merchants_by_subs(env: &Env, limit: u32) -> Vec<(Address, u32)> {
             let s_len = sorted.len();
 
             for j in 0..s_len {
-                let existing = sorted.get(j).unwrap();
+                let existing: (Address, u32) = sorted.get(j).unwrap();
                 if !inserted && item.1 > existing.1 {
                     new_sorted.push_back(item.clone());
                     inserted = true;
@@ -245,6 +245,24 @@ pub fn prune_merchant_revenue_days(env: &Env, merchant: &Address, days: Vec<u64>
 pub fn get_merchant_revenue_day(env: &Env, merchant: &Address, day: u64) -> i128 {
     let key = DataKey::MerchantRevenueDay(merchant.clone(), day);
     env.storage().persistent().get(&key).unwrap_or(0i128)
+}
+
+const MAX_MERCHANT_SUB_COUNT_BATCH: u32 = 50;
+
+/// Returns active subscriber counts for multiple merchants in a single call.
+/// Capped at 50 merchants; panics with `BatchTooLarge` above that.
+/// Returns `(addr, 0)` for merchants with no recorded count.
+pub fn get_merchant_sub_counts(env: &Env, merchants: &Vec<Address>) -> Vec<(Address, u32)> {
+    if merchants.len() > MAX_MERCHANT_SUB_COUNT_BATCH {
+        env.panic_with_error(crate::errors::ContractError::BatchTooLarge);
+    }
+
+    let mut result = Vec::new(env);
+    for merchant in merchants.iter() {
+        let count = crate::subscription_count::get_merchant_sub_count(env, &merchant);
+        result.push_back((merchant, count));
+    }
+    result
 }
 
 /// Returns aggregate revenue statistics for a merchant: (total, count, min_charge, max_charge).

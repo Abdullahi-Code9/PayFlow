@@ -144,15 +144,6 @@ pub fn publish_min_interval_set(env: &Env, old: u64, new: u64) {
     );
 }
 
-pub fn emit_min_interval_set(env: &Env, old: u64, new: u64) {
-    publish_min_interval_set(env, old, new);
-}
-
-pub fn publish_min_interval_updated(env: &Env, seconds: u64) {
-    env.events()
-        .publish((Symbol::new(env, "min_interval"),), seconds);
-}
-
 pub fn publish_merchant_history_cleared(env: &Env, merchant: &Address) {
     env.events()
         .publish((Symbol::new(env, "merch_hist_cleared"),), merchant.clone());
