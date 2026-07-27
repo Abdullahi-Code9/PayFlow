@@ -36,6 +36,8 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     env.storage().persistent().set(&size_key, &(size + 1));
     env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
 
+        env.storage()
+        .persistent()
         .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
     merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);

@@ -135,6 +135,114 @@ fn test_subscribe_and_charge() {
     let sub_after = client.get_subscription(&user).unwrap();
     assert!(sub_after.last_charged > 0);
 }
+#[test]
+fn test_subscription_age_after_subscribe() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let amount: i128 = 5_0000000;
+    let interval: u64 = 30 * 24 * 60 * 60;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let elapsed: u64 = 1000;
+    env.ledger().with_mut(|l| {
+        l.timestamp += elapsed;
+    });
+
+    let age = client.get_subscription_age(&user);
+    assert_eq!(age, Some(elapsed));
+}
+
+#[test]
+fn test_subscription_age_resets_on_resubscribe() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let amount: i128 = 5_0000000;
+    let interval: u64 = 30 * 24 * 60 * 60;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += 5000;
+    });
+
+    client.cancel(&user);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let elapsed_after_resub: u64 = 200;
+    env.ledger().with_mut(|l| {
+        l.timestamp += elapsed_after_resub;
+    });
+
+    let age = client.get_subscription_age(&user);
+    assert_eq!(age, Some(elapsed_after_resub));
+}
+
+#[test]
+fn test_subscription_age_none_when_no_subscription() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let age = client.get_subscription_age(&user);
+    assert_eq!(age, None);
+}
+
+#[test]
+fn test_subscription_age_none_for_migrated_sentinel() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let amount: i128 = 5_0000000;
+    let interval: u64 = 30 * 24 * 60 * 60;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    // Simulate a pre-existing subscription migrated with the created_at = 0 sentinel
+    env.as_contract(&contract_id, || {
+        let key = crate::DataKey::Subscription(user.clone());
+        let mut sub: crate::Subscription = env.storage().persistent().get(&key).unwrap();
+        sub.created_at = 0;
+        env.storage().persistent().set(&key, &sub);
+    });
+
+    let age = client.get_subscription_age(&user);
+    assert_eq!(age, None);
+}
 
 #[test]
 fn test_batch_charge_empty() {

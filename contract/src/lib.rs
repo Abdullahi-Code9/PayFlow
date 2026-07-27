@@ -146,6 +146,7 @@ pub struct Subscription {
     pub referrer: Option<Address>, // optional referral address
     pub label: Symbol,             // user-assigned label for this subscription
     pub trial_duration: u64,       // optional trial duration in seconds
+    pub created_at: u64,           // timestamp of subscription creation
 }
 
 #[contracttype]
@@ -837,6 +838,16 @@ impl FlowPay {
         env.storage().persistent().get(&DataKey::Subscription(user))
     }
 
+    pub fn get_subscription_age(env: Env, user: Address) -> Option<u64> {
+        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+
+        if sub.created_at == 0 {
+            return None; // sentinel for migrated/unknown subscriptions
+        }
+
+        Some(env.ledger().timestamp() - sub.created_at)
+    }
+
     /// Returns the Unix timestamp of the next scheduled charge for a user.
     ///
     /// Returns `None` if no subscription exists, the subscription is inactive,
@@ -1092,6 +1103,8 @@ impl FlowPay {
     /// Returns the total count of whitelisted merchants.
     pub fn get_whitelist_size(env: Env) -> u32 {
         whitelist::get_whitelist_size(&env)
+    }
+    
     /// Returns top N merchants ranked by subscriber count in descending order.
     /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
     pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
@@ -1902,6 +1915,7 @@ fn subscribe_inner(
         referrer: referrer.clone(),
         label: Symbol::new(env, ""),
         trial_duration,
+        created_at: env.ledger().timestamp(),
     };
 
     env.storage()

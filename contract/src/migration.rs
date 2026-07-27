@@ -19,7 +19,7 @@ pub struct SubscriptionV1 {
 
 /// Current storage schema version.
 #[allow(dead_code)]
-pub const CURRENT_VERSION: u32 = 2;
+pub const CURRENT_VERSION: u32 = 3;
 
 /// Returns the stored schema version, defaulting to 0 (unmigrated).
 pub fn get_schema_version(env: &Env) -> u32 {
@@ -52,6 +52,11 @@ pub fn migrate(env: &Env, users: Vec<Address>) {
         // v1 → v2: stamp the schema version
         set_schema_version(env, 2);
     }
+    if version < 3 {
+    // v2 → v3: created_at field introduced; existing subscriptions
+    // are stamped with sentinel value 0 (age unknown)
+    set_schema_version(env, 3);
+}
 
     let user_count = users.len();
 
@@ -72,6 +77,7 @@ pub fn migrate(env: &Env, users: Vec<Address>) {
                 referrer: v1_sub.referrer,
                 label: v1_sub.label,
                 trial_duration: v1_sub.trial_duration,
+                created_at: 0, // sentinel — subscription existed before this field was tracked
             };
 
             env.storage().persistent().set(&key, &v2_sub);
