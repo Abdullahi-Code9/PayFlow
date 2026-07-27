@@ -1092,6 +1092,8 @@ impl FlowPay {
     /// Returns the total count of whitelisted merchants.
     pub fn get_whitelist_size(env: Env) -> u32 {
         whitelist::get_whitelist_size(&env)
+    }
+
     /// Returns top N merchants ranked by subscriber count in descending order.
     /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
     pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
@@ -1244,6 +1246,52 @@ impl FlowPay {
             i += 1;
         }
         result
+    }
+
+    /// Extends the TTL of all subscriber index entries to prevent archival.
+    ///
+    /// Iterates `SubscriberIndex(0..size)` and calls `extend_ttl` on each,
+    /// along with `SubscriberIndexSize`, `SubscriberIndexSlot`, and
+    /// `SubscriberIndexRemoved` entries. Bumps TTL to `SUBSCRIPTION_TTL_LEDGERS`.
+    ///
+    /// # Auth
+    ///
+    /// Requires authorization from the contract admin.
+    ///
+    /// # Side Effects
+    ///
+    /// Extends the TTL of every persistent subscriber index entry and emits
+    /// a `subscriber_index_ttl_extended` event with the total count.
+    pub fn extend_subscriber_index_ttl(env: Env) {
+        admin::require_admin(&env);
+
+        let size = subscription_count::get_subscriber_index_size(&env);
+
+        if size == 0 {
+            return;
+        }
+
+        // Extend the size counter itself
+        env.storage().persistent().extend_ttl(
+            &DataKey::SubscriberIndexSize,
+            SUBSCRIPTION_TTL_LEDGERS,
+            SUBSCRIPTION_TTL_LEDGERS,
+        );
+
+        let mut count: u64 = 0;
+        let mut i: u64 = 0;
+        while i < size {
+            let key = DataKey::SubscriberIndex(i);
+            env.storage().persistent().extend_ttl(
+                &key,
+                SUBSCRIPTION_TTL_LEDGERS,
+                SUBSCRIPTION_TTL_LEDGERS,
+            );
+            count += 1;
+            i += 1;
+        }
+
+        events::publish_subscriber_index_ttl_extended(&env, count);
     }
 
     // ─────────────────────────────────────────────────────────────

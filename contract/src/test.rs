@@ -6584,3 +6584,111 @@ fn test_daily_spent_reset() {
     
     assert!(client.get_day_start(&user).is_none());
 }
+
+// ─────────────────────────────────────────────────────────────
+// Issue #11: extend_subscriber_index_ttl tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_extend_subscriber_index_ttl_empty_index_noop() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    assert_eq!(client.get_subscriber_count(), 0);
+    client.extend_subscriber_index_ttl();
+    assert_eq!(client.get_subscriber_count(), 0);
+}
+
+#[test]
+fn test_extend_subscriber_index_ttl_emits_event_with_count() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    let user_b = setup_funded_user(&env, &contract_id, &token_addr);
+
+    client.subscribe(&user, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
+    client.subscribe(&user_b, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
+
+    assert_eq!(client.get_subscriber_count(), 2);
+
+    client.extend_subscriber_index_ttl();
+
+    let events = env.events().all();
+    let (_, topics, data) = events.get(events.len() - 1).unwrap();
+    let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let count: u64 = data.try_into_val(&env).unwrap();
+
+    assert_eq!(topic_symbol, Symbol::new(&env, "subscriber_index_ttl_extended"));
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn test_extend_subscriber_index_ttl_extends_large_index() {
+    use soroban_sdk::testutils::storage::Persistent as _;
+
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+
+    for _ in 0..5 {
+        let u = setup_funded_user(&env, &contract_id, &token_addr);
+        client.subscribe(&u, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
+        users.push_back(u);
+    }
+
+    assert_eq!(client.get_subscriber_count(), 5);
+
+    client.extend_subscriber_index_ttl();
+
+    let events = env.events().all();
+    let (_, _, data) = events.get(events.len() - 1).unwrap();
+    let count: u64 = data.try_into_val(&env).unwrap();
+    assert_eq!(count, 5);
+
+    env.as_contract(&contract_id, || {
+        let ttl = env
+            .storage()
+            .persistent()
+            .get_ttl(&DataKey::SubscriberIndexSize);
+        assert!(ttl >= SUBSCRIPTION_TTL_LEDGERS);
+
+        let ttl_0 = env
+            .storage()
+            .persistent()
+            .get_ttl(&DataKey::SubscriberIndex(0));
+        assert!(ttl_0 >= SUBSCRIPTION_TTL_LEDGERS);
+    });
+}
+
+#[test]
+#[should_panic]
+fn test_extend_subscriber_index_ttl_non_admin_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    env.set_auths(&[]);
+
+    client.extend_subscriber_index_ttl();
+}
