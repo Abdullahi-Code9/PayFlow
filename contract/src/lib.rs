@@ -1113,6 +1113,21 @@ impl FlowPay {
         whitelist::get_whitelist_size(&env)
     }
 
+    /// Returns the whitelist and freeze status for a batch of merchant addresses.
+    /// Capped at MAX_WHITELIST_BATCH_SIZE (50) per call.
+    pub fn get_merchant_statuses(env: Env, merchants: Vec<Address>) -> Vec<(Address, bool, bool)> {
+        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
+            env.panic_with_error(ContractError::BatchTooLarge);
+        }
+        let mut result = Vec::new(&env);
+        for merchant in merchants.iter() {
+            let whitelisted = whitelist::is_whitelisted(&env, &merchant);
+            let frozen = whitelist::is_frozen(&env, &merchant);
+            result.push_back((merchant, whitelisted, frozen));
+        }
+        result
+    }
+
     /// Returns top N merchants ranked by subscriber count in descending order.
     /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
     pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
@@ -1276,6 +1291,33 @@ impl FlowPay {
             if !subscription_count::is_subscriber_index_removed(&env, i) {
                 if let Some(addr) = env.storage().persistent().get(&DataKey::SubscriberIndex(i)) {
                     result.push_back(addr);
+                }
+            }
+            i += 1;
+        }
+        result
+    }
+
+    /// Returns a list of subscriber addresses that are currently due for charging.
+    /// Reads from the `SubscriberIndex` starting from `offset` up to `offset + limit`.
+    /// Capped at 50 per call.
+    pub fn get_next_charge_batch(env: Env, offset: u64, limit: u32) -> Vec<Address> {
+        if limit > 50 {
+            env.panic_with_error(ContractError::BatchTooLarge);
+        }
+        let size = subscription_count::get_subscriber_index_size(&env);
+        let mut result = Vec::new(&env);
+        if offset >= size || limit == 0 {
+            return result;
+        }
+        let mut i = offset;
+        let end = (offset + limit as u64).min(size);
+        while i < end {
+            if !subscription_count::is_subscriber_index_removed(&env, i) {
+                if let Some(addr) = env.storage().persistent().get::<DataKey, Address>(&DataKey::SubscriberIndex(i)) {
+                    if Self::is_charge_due(env.clone(), addr.clone()) {
+                        result.push_back(addr);
+                    }
                 }
             }
             i += 1;

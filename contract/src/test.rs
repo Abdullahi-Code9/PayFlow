@@ -6692,3 +6692,158 @@ fn test_extend_subscriber_index_ttl_non_admin_panics() {
 
     client.extend_subscriber_index_ttl();
 }
+
+// ─────────────────────────────────────────────
+// Batch queries tests
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_get_merchant_statuses_empty() {
+    let (env, contract_id, _, _, _) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let merchants = soroban_sdk::Vec::new(&env);
+    let result = client.get_merchant_statuses(&merchants);
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_get_merchant_statuses_mixed() {
+    let (env, contract_id, _, _, _) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    let m1 = Address::generate(&env); // whitelisted
+    let m2 = Address::generate(&env); // frozen
+    let m3 = Address::generate(&env); // whitelisted + frozen
+    let m4 = Address::generate(&env); // completely unknown (neither)
+
+    client.add_merchant(&m1);
+    client.freeze_merchant(&m2, &None);
+    client.add_merchant(&m3);
+    client.freeze_merchant(&m3, &None);
+
+    let mut merchants = soroban_sdk::Vec::new(&env);
+    merchants.push_back(m1.clone());
+    merchants.push_back(m2.clone());
+    merchants.push_back(m3.clone());
+    merchants.push_back(m4.clone());
+
+    let result = client.get_merchant_statuses(&merchants);
+    assert_eq!(result.len(), 4);
+
+    let (addr1, w1, f1) = result.get(0).unwrap();
+    assert_eq!(addr1, m1);
+    assert!(w1);
+    assert!(!f1);
+
+    let (addr2, w2, f2) = result.get(1).unwrap();
+    assert_eq!(addr2, m2);
+    assert!(!w2);
+    assert!(f2);
+
+    let (addr3, w3, f3) = result.get(2).unwrap();
+    assert_eq!(addr3, m3);
+    assert!(w3);
+    assert!(f3);
+
+    let (addr4, w4, f4) = result.get(3).unwrap();
+    assert_eq!(addr4, m4);
+    assert!(!w4);
+    assert!(!f4);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_get_merchant_statuses_exceeds_limit_panics() {
+    let (env, contract_id, _, _, _) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let mut merchants = soroban_sdk::Vec::new(&env);
+    for _ in 0..51 {
+        merchants.push_back(Address::generate(&env));
+    }
+    client.get_merchant_statuses(&merchants);
+}
+
+#[test]
+fn test_get_next_charge_batch_empty_and_bounds() {
+    let (env, contract_id, _, _, _) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let batch = client.get_next_charge_batch(&0, &10);
+    assert_eq!(batch.len(), 0);
+
+    let batch_oob = client.get_next_charge_batch(&5, &10);
+    assert_eq!(batch_oob.len(), 0);
+}
+
+#[test]
+fn test_get_next_charge_batch_filtering() {
+    let (env, contract_id, token_addr, user_due, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let user_not_due = setup_funded_user(&env, &contract_id, &token_addr);
+    let user_paused = setup_funded_user(&env, &contract_id, &token_addr);
+    let user_cancelled = setup_funded_user(&env, &contract_id, &token_addr);
+
+    let interval: u64 = 86400;
+
+    client.subscribe(&user_due, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+    client.subscribe(&user_paused, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+    client.subscribe(&user_cancelled, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+
+    client.pause(&user_paused);
+    client.cancel(&user_cancelled);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    client.subscribe(&user_not_due, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+
+    let batch = client.get_next_charge_batch(&0, &10);
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch.get(0).unwrap(), user_due);
+}
+
+#[test]
+fn test_get_next_charge_batch_pagination() {
+    let (env, contract_id, token_addr, user1, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let user2 = setup_funded_user(&env, &contract_id, &token_addr);
+    let user3 = setup_funded_user(&env, &contract_id, &token_addr);
+
+    let interval: u64 = 86400;
+
+    client.subscribe(&user1, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+    client.subscribe(&user2, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+    client.subscribe(&user3, &merchant, &1_0000000, &interval, &token_addr, &None, &None);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let batch1 = client.get_next_charge_batch(&0, &2);
+    assert_eq!(batch1.len(), 2);
+    assert_eq!(batch1.get(0).unwrap(), user1);
+    assert_eq!(batch1.get(1).unwrap(), user2);
+
+    let batch2 = client.get_next_charge_batch(&2, &2);
+    assert_eq!(batch2.len(), 1);
+    assert_eq!(batch2.get(0).unwrap(), user3);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_get_next_charge_batch_exceeds_limit_panics() {
+    let (env, contract_id, _, _, _) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.get_next_charge_batch(&0, &51);
+}
