@@ -1,6 +1,6 @@
 use soroban_sdk::{token, Address, Env};
 
-use crate::{errors::ContractError, DataKey, Subscription};
+use crate::{errors::ContractError, validation, DataKey, Subscription};
 
 /// Retrieves the fee collector address from instance storage.
 pub fn get_fee_collector(env: &Env) -> Option<Address> {
@@ -29,6 +29,7 @@ pub fn set_fee(env: &Env, collector: Address, bps: u32) {
     if bps > 10_000 {
         env.panic_with_error(ContractError::InvalidFeeBps);
     }
+    validation::validate_recipient_address(env, &collector);
     env.storage()
         .instance()
         .set(&DataKey::FeeCollector, &collector);

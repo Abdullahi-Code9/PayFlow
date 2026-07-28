@@ -3,6 +3,15 @@ use soroban_sdk::{token, Address, Env};
 use crate::errors::ContractError;
 use crate::Subscription;
 
+/// Validates that `addr` is not the contract's own address.
+/// Panics with `ContractError::InvalidFeeCollector` if they match.
+/// Must be called before storing any address that will receive token transfers.
+pub fn validate_recipient_address(env: &Env, addr: &Address) {
+    if addr == &env.current_contract_address() {
+        env.panic_with_error(ContractError::InvalidFeeCollector);
+    }
+}
+
 /// Verifies that `user` has granted the contract an allowance of at least
 /// `min_amount` for `token`. Panics with `ContractError::InsufficientAllowance`
 /// if the check fails.
