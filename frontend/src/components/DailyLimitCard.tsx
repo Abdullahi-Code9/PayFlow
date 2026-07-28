@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { getDailyLimit, getDailySpent } from "../stellar";
-import { formatXlm } from "../utils/format";
+import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import Spinner from "./Spinner";
 
 interface Props {
@@ -14,6 +14,7 @@ export default function DailyLimitCard({ userKey, refreshTrigger, onOpen }: Prop
   const [dailySpent, setDailySpent] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { displayCurrentAmount } = useAmountDisplay();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -71,12 +72,12 @@ export default function DailyLimitCard({ userKey, refreshTrigger, onOpen }: Prop
         <div className="subscription-rows">
           <Row
             label="Daily limit"
-            value={dailyLimit !== null ? formatXlm(dailyLimit) : "Not set"}
+            value={dailyLimit !== null ? displayCurrentAmount(dailyLimit) : "Not set"}
           />
-          <Row label="Today's spend" value={dailySpent !== null ? formatXlm(dailySpent) : "—"} />
+          <Row label="Today's spend" value={dailySpent !== null ? displayCurrentAmount(dailySpent) : "—"} />
           <Row
             label="Remaining"
-            value={remaining !== null ? (remaining >= 0n ? formatXlm(remaining) : "Exceeded") : "—"}
+            value={remaining !== null ? (remaining >= 0n ? displayCurrentAmount(remaining) : "Exceeded") : "—"}
           />
         </div>
       )}

@@ -2,8 +2,10 @@ import React, { useMemo, useRef, useState } from "react";
 import { useContractEvents } from "../hooks/useContractEvents";
 import { ChargeEvent } from "../types";
 import { STROOPS_PER_XLM } from "../constants";
+import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import Spinner from "./Spinner";
 import CopyButton from "./CopyButton";
+import { ChargeHistorySkeleton } from "./Skeleton";
 
 interface Props {
   userKey: string;
@@ -11,11 +13,6 @@ interface Props {
 
 /** Number of charge events shown per page. */
 const PAGE_SIZE = 20;
-
-function formatAmount(stroops: string): string {
-  const xlm = Number(stroops) / STROOPS_PER_XLM;
-  return `${xlm.toFixed(2)} XLM`;
-}
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString(undefined, {
@@ -74,6 +71,7 @@ export default function SubscriptionHistory({ userKey }: Props) {
     loadMore,
     hasMore,
   } = useContractEvents("charged", userKey);
+  const { displayCurrentAmount } = useAmountDisplay();
 
   // Cache of the last successfully fetched events for stale-while-revalidate.
   const cachedEventsRef = useRef<ChargeEvent[]>([]);
@@ -138,9 +136,11 @@ export default function SubscriptionHistory({ userKey }: Props) {
   if (!hasData && loading) {
     return (
       <div className="card" aria-busy="true" aria-label="Loading charge history">
-        <h3 className="subscription-card__title">Charge History</h3>
-        <div style={{ padding: "var(--space-4) 0", textAlign: "center" }}>
-          <Spinner />
+        <h3 className="subscription-card__title" style={{ marginBottom: "var(--space-4)" }}>Charge History</h3>
+        <div className="charge-history-list" role="list">
+          <ChargeHistorySkeleton />
+          <ChargeHistorySkeleton />
+          <ChargeHistorySkeleton />
         </div>
       </div>
     );
@@ -241,7 +241,7 @@ export default function SubscriptionHistory({ userKey }: Props) {
             >
               <span className="subscription-row__value">{formatDate(event.date)}</span>
               <span className="subscription-row__value" style={{ fontWeight: 600 }}>
-                {formatAmount(event.amount)}
+                {displayCurrentAmount(event.amount)}
               </span>
             </div>
             <div

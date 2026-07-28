@@ -52,6 +52,7 @@ pub enum DataKey {
     WhitelistIndexSize,
     // Merchant freeze: blocks new subscriptions, independent of whitelist status
     MerchantFrozen(Address),
+    MerchantFreezeReason(Address),
     // Protocol fee
     FeeCollector,
     FeeBps,
@@ -61,6 +62,8 @@ pub enum DataKey {
     MerchantRevenue(Address),
     // Per-day merchant revenue buckets (keyed by Unix day)
     MerchantRevenueDay(Address, u64),
+    // Index of which days have revenue buckets for a merchant
+    MerchantRevenueDayIndex(Address),
     // Feature: daily spending limits (temporary storage)
     DailyLimit(Address),
     DailySpent(Address),
@@ -171,6 +174,9 @@ pub struct HealthReport {
     pub instance_ttl_ledgers: u32,
     pub active_subscription_count: u64,
     pub schema_version: u32,
+    pub fee_collector_set: bool,
+    pub global_volume_utilization_pct: u32,
+    pub pending_merchant_revenues_count: u32,
 }
 
 #[contracttype]
@@ -560,6 +566,19 @@ impl FlowPay {
         user.require_auth();
         cancel_inner(&env, &user);
         events::publish_cancelled(&env, &user);
+    }
+
+    /// Extends an active subscription's trial period (or delays next charge)
+    /// by adding `additional_seconds` to its `last_charged` timestamp.
+    ///
+    /// # Panics
+    /// - If `additional_seconds` is 0 (`IntervalMustBePositive`).
+    /// - If the subscription is cancelled/inactive (`SubscriptionInactive`).
+    /// - If the subscription doesn't exist (`NoSubscriptionFound`).
+    pub fn extend_trial(env: Env, user: Address, additional_seconds: u64) {
+        bump_instance_ttl(&env);
+        user.require_auth();
+        trial::extend_trial(&env, &user, additional_seconds);
     }
 
     pub fn cancel_and_refund_prorated(env: Env, user: Address, merchant: Address) {
@@ -1104,7 +1123,7 @@ impl FlowPay {
     pub fn get_whitelist_size(env: Env) -> u32 {
         whitelist::get_whitelist_size(&env)
     }
-    
+
     /// Returns top N merchants ranked by subscriber count in descending order.
     /// `limit` is capped at 20; panics with `ContractError::BatchTooLarge` if exceeded.
     pub fn get_top_merchants_by_subs(env: Env, limit: u32) -> Vec<(Address, u32)> {
@@ -1142,15 +1161,20 @@ impl FlowPay {
     /// Freezes a merchant, blocking new subscriptions while leaving existing
     /// subscribers' charge and pay_per_use calls unaffected. Independent of
     /// whitelist status — idempotent.
-    pub fn freeze_merchant(env: Env, merchant: Address) {
+    pub fn freeze_merchant(env: Env, merchant: Address, reason: Option<String>) {
         admin::require_admin(&env);
-        whitelist::freeze(&env, &merchant);
+        whitelist::freeze(&env, &merchant, reason);
     }
 
     /// Unfreezes a merchant, allowing new subscriptions again. Idempotent.
     pub fn unfreeze_merchant(env: Env, merchant: Address) {
         admin::require_admin(&env);
         whitelist::unfreeze(&env, &merchant);
+    }
+    
+    /// Returns the reason a merchant was frozen, if any.
+    pub fn get_merchant_freeze_reason(env: Env, merchant: Address) -> Option<String> {
+        whitelist::get_freeze_reason(&env, &merchant)
     }
 
     /// Extends the TTL of a specific merchant daily revenue bucket.
@@ -1166,6 +1190,17 @@ impl FlowPay {
     /// Retrieves a specific daily revenue bucket. Returns 0 if missing.
     pub fn get_merchant_revenue_day(env: Env, merchant: Address, day: u64) -> i128 {
         merchant_stats::get_merchant_revenue_day(&env, &merchant, day)
+    }
+
+    /// Returns paginated per-day revenue pairs for a merchant.
+    /// Limit is capped at 30. Returns an empty Vec if no history or out of bounds.
+    pub fn get_merchant_revenue_day_page(
+        env: Env,
+        merchant: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<(u64, i128)> {
+        merchant_stats::get_merchant_revenue_day_page(&env, &merchant, offset, limit)
     }
 
     /// Returns whether a merchant is currently frozen.
@@ -1259,6 +1294,52 @@ impl FlowPay {
         result
     }
 
+    /// Extends the TTL of all subscriber index entries to prevent archival.
+    ///
+    /// Iterates `SubscriberIndex(0..size)` and calls `extend_ttl` on each,
+    /// along with `SubscriberIndexSize`, `SubscriberIndexSlot`, and
+    /// `SubscriberIndexRemoved` entries. Bumps TTL to `SUBSCRIPTION_TTL_LEDGERS`.
+    ///
+    /// # Auth
+    ///
+    /// Requires authorization from the contract admin.
+    ///
+    /// # Side Effects
+    ///
+    /// Extends the TTL of every persistent subscriber index entry and emits
+    /// a `subscriber_index_ttl_extended` event with the total count.
+    pub fn extend_subscriber_index_ttl(env: Env) {
+        admin::require_admin(&env);
+
+        let size = subscription_count::get_subscriber_index_size(&env);
+
+        if size == 0 {
+            return;
+        }
+
+        // Extend the size counter itself
+        env.storage().persistent().extend_ttl(
+            &DataKey::SubscriberIndexSize,
+            SUBSCRIPTION_TTL_LEDGERS,
+            SUBSCRIPTION_TTL_LEDGERS,
+        );
+
+        let mut count: u64 = 0;
+        let mut i: u64 = 0;
+        while i < size {
+            let key = DataKey::SubscriberIndex(i);
+            env.storage().persistent().extend_ttl(
+                &key,
+                SUBSCRIPTION_TTL_LEDGERS,
+                SUBSCRIPTION_TTL_LEDGERS,
+            );
+            count += 1;
+            i += 1;
+        }
+
+        events::publish_subscriber_index_ttl_extended(&env, count);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Merchant revenue
     // ─────────────────────────────────────────────────────────────
@@ -1346,6 +1427,14 @@ impl FlowPay {
     /// Returns the number of active subscribers for a given merchant (as u32).
     pub fn get_merchant_sub_count(env: Env, merchant: Address) -> u32 {
         subscription_count::get_merchant_sub_count(&env, &merchant)
+    }
+
+    /// Returns active subscriber counts for multiple merchants in a single call.
+    /// Capped at 50 merchants; panics with `BatchTooLarge` above that.
+    /// Returns `(addr, 0)` for merchants with no recorded count.
+    /// No auth required.
+    pub fn get_merchant_sub_counts(env: Env, merchants: Vec<Address>) -> Vec<(Address, u32)> {
+        merchant_stats::get_merchant_sub_counts(&env, &merchants)
     }
 
     /// Resets a merchant's cumulative revenue counter to zero.
@@ -1558,6 +1647,7 @@ impl FlowPay {
         let contract_paused = storage::is_contract_paused(&env);
         let token_configured = storage::get_token(&env).is_some();
         let admin_configured = storage::get_admin_optional(&env).is_some();
+        let fee_collector_set = fee::get_fee_collector(&env).is_some();
 
         #[cfg(any(test, feature = "testutils"))]
         let instance_ttl_ledgers = {
@@ -1566,8 +1656,30 @@ impl FlowPay {
         };
         #[cfg(not(any(test, feature = "testutils")))]
         let instance_ttl_ledgers = 100_000; // at least 1 day of TTL remaining, used as default since get_ttl is not available on-chain
+        
         let active_subscription_count = subscription_count::get_active_count(&env);
         let schema_version = migration::get_schema_version(&env);
+
+        let window: Option<GlobalVolumeWindow> = env.storage().instance().get(&DataKey::GlobalVolumeWindow);
+        let accumulated_volume = window.map(|w| w.accumulated_volume).unwrap_or(0);
+        let cap = env.storage().instance().get(&DataKey::GlobalVolumeCapOverride).unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR);
+
+        let pct = if cap > 0 {
+            ((accumulated_volume * 100) / cap) as u32
+        } else {
+            0
+        };
+        let global_volume_utilization_pct = if pct > 100 { 100 } else { pct };
+
+        let total_merchants = merchant_stats::get_merchant_index_size(&env);
+        let mut pending_merchant_revenues_count = 0;
+        for i in 0..total_merchants {
+            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
+                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
+                    pending_merchant_revenues_count += 1;
+                }
+            }
+        }
 
         // Healthy when not paused, fully configured, and at least 1 day of TTL remaining (17_280 ledgers at ~5 s/ledger)
         let is_healthy = !contract_paused
@@ -1583,6 +1695,9 @@ impl FlowPay {
             instance_ttl_ledgers,
             active_subscription_count,
             schema_version,
+            fee_collector_set,
+            global_volume_utilization_pct,
+            pending_merchant_revenues_count,
         }
     }
 
