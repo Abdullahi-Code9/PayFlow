@@ -6692,3 +6692,288 @@ fn test_extend_subscriber_index_ttl_non_admin_panics() {
 
     client.extend_subscriber_index_ttl();
 }
+
+// ─────────────────────────────────────────────────────────────
+// Issue #610: get_subscription_token tests
+// ─────────────────────────────────────────────────────────────
+
+/// get_subscription_token returns None before the user subscribes.
+#[test]
+fn test_get_subscription_token_none_before_subscribe() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    assert!(
+        client.get_subscription_token(&random).is_none(),
+        "get_subscription_token should return None for a user with no subscription"
+    );
+}
+
+/// get_subscription_token returns Some(token) after subscribe.
+#[test]
+fn test_get_subscription_token_some_after_subscribe() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    assert_eq!(
+        client.get_subscription_token(&user),
+        Some(token_addr),
+        "get_subscription_token should return Some(token) after subscribe"
+    );
+}
+
+/// get_subscription_token still returns Some(token) after cancel — the record
+/// exists but is inactive; callers that need to distinguish active vs cancelled
+/// should use get_subscription instead.
+#[test]
+fn test_get_subscription_token_some_after_cancel() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.cancel(&user);
+
+    // The subscription record still exists (active=false), so token is still readable.
+    assert_eq!(
+        client.get_subscription_token(&user),
+        Some(token_addr),
+        "get_subscription_token should return Some(token) for cancelled subscription"
+    );
+}
+
+/// get_subscription_token reflects the token when the user re-subscribes with
+/// a different token.
+#[test]
+fn test_get_subscription_token_updates_on_resubscribe() {
+    let (env, contract_id, token_a, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user, &merchant, &1_0000000, &86400, &token_a, &None, &None,
+    );
+    assert_eq!(client.get_subscription_token(&user), Some(token_a.clone()));
+
+    let token_b = setup_second_token(&env, &contract_id, &user);
+    client.subscribe(
+        &user, &merchant, &2_0000000, &86400, &token_b, &None, &None,
+    );
+
+    assert_eq!(
+        client.get_subscription_token(&user),
+        Some(token_b),
+        "get_subscription_token should return the latest token after resubscribe"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Issue #611: propose_fee / commit_fee two-step tests
+// ─────────────────────────────────────────────────────────────
+
+/// Full propose → commit flow sets the fee collector and bps.
+#[test]
+fn test_propose_and_commit_fee_sets_fee() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &250);
+    client.commit_fee();
+
+    let result = client.get_fee();
+    assert!(result.is_some());
+    let (stored_collector, stored_bps) = result.unwrap();
+    assert_eq!(stored_collector, collector);
+    assert_eq!(stored_bps, 250);
+}
+
+/// propose_fee emits a fee_proposed event.
+#[test]
+fn test_propose_fee_emits_fee_proposed_event() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &100);
+
+    let events = env.events().all();
+    let (_, topics, _) = events.get(events.len() - 1).unwrap();
+    let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_symbol, Symbol::new(&env, "fee_proposed"));
+}
+
+/// commit_fee emits a fee_committed event.
+#[test]
+fn test_commit_fee_emits_fee_committed_event() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &50);
+    client.commit_fee();
+
+    let events = env.events().all();
+    let (_, topics, _) = events.get(events.len() - 1).unwrap();
+    let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_symbol, Symbol::new(&env, "fee_committed"));
+}
+
+/// commit_fee without a prior propose panics with NoPendingProposal (#23).
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_commit_fee_without_proposal_panics() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.commit_fee();
+}
+
+/// propose_fee with bps > 10000 panics with InvalidFeeBps (#13).
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_propose_fee_invalid_bps_panics() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &10_001);
+}
+
+/// A re-propose before commit replaces the pending fee — commit applies
+/// the latest proposal.
+#[test]
+fn test_repropose_before_commit_applies_latest() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector_a = Address::generate(&env);
+    let collector_b = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector_a, &100);
+    // Re-propose with different values before committing
+    client.propose_fee(&collector_b, &200);
+    client.commit_fee();
+
+    let (stored_collector, stored_bps) = client.get_fee().unwrap();
+    assert_eq!(stored_collector, collector_b);
+    assert_eq!(stored_bps, 200);
+}
+
+/// After commit_fee, committing again without a new propose panics.
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_double_commit_without_repropose_panics() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &100);
+    client.commit_fee();
+    // Second commit without a new propose must panic
+    client.commit_fee();
+}
+
+/// Bps of exactly 10000 (100%) is valid at both propose and commit.
+#[test]
+fn test_propose_fee_max_valid_bps() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &10_000);
+    client.commit_fee();
+
+    let (_, stored_bps) = client.get_fee().unwrap();
+    assert_eq!(stored_bps, 10_000);
+}
+
+/// Bps of 0 is valid (disabling the fee while keeping the collector).
+#[test]
+fn test_propose_fee_zero_bps_valid() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.propose_fee(&collector, &0);
+    client.commit_fee();
+
+    let (_, stored_bps) = client.get_fee().unwrap();
+    assert_eq!(stored_bps, 0);
+}
+
+/// Non-admin calling propose_fee panics.
+#[test]
+#[should_panic]
+fn test_propose_fee_non_admin_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    // No admin set; require_admin call inside propose_fee should panic.
+    // NOTE: propose_fee in lib.rs calls bump_instance_ttl then fee::propose_fee.
+    // fee::propose_fee itself does not require_admin — the admin guard
+    // is the caller's responsibility in lib.rs.  We verify the whole
+    // public entry point panics when no admin is configured.
+    let collector = Address::generate(&env);
+
+    // Explicitly set an admin so admin check works, then revoke auths.
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+    env.set_auths(&[]);
+
+    client.propose_fee(&collector, &100);
+}

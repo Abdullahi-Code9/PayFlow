@@ -175,7 +175,7 @@ pub struct HealthReport {
     pub schema_version: u32,
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
-    pub pending_merchant_revenues_count: u32,
+    pub pending_merchant_rev_count: u32,
 }
 
 #[contracttype]
@@ -1202,17 +1202,38 @@ impl FlowPay {
         fee::get_fee_collector(&env).map(|collector| (collector, fee::get_fee_bps(&env)))
     }
 
-    /// Proposes new protocol fee collection settings.
-    /// Only the contract admin can call this.
+    /// Proposes new protocol fee collection settings (step 1 of two-step commit).
+    /// Stores the proposed `(collector, bps)` in temporary storage and emits
+    /// `fee_proposed`. Must be followed by `commit_fee()` to take effect.
+    ///
+    /// # Auth
+    ///
+    /// Requires authorization from the current admin.
+    ///
+    /// # Errors
+    ///
+    /// Panics if `bps > 10000` (`InvalidFeeBps`) or if `collector` is the
+    /// contract's own address (`InvalidFeeCollector`).
     pub fn propose_fee(env: Env, collector: Address, bps: u32) {
         bump_instance_ttl(&env);
+        admin::require_admin(&env);
         fee::propose_fee(&env, collector, bps);
     }
 
-    /// Commits pending protocol fee collection settings.
-    /// Only the contract admin can call this.
+    /// Commits a pending fee proposal (step 2 of two-step commit).
+    /// Reads the pending `(collector, bps)` from temporary storage, applies it
+    /// to instance storage, removes the pending entry, and emits `fee_committed`.
+    ///
+    /// # Auth
+    ///
+    /// Requires authorization from the current admin.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `NoPendingProposal` if no pending fee exists.
     pub fn commit_fee(env: Env) {
         bump_instance_ttl(&env);
+        admin::require_admin(&env);
         fee::commit_fee(&env);
     }
 
@@ -1661,11 +1682,11 @@ impl FlowPay {
         let global_volume_utilization_pct = if pct > 100 { 100 } else { pct };
 
         let total_merchants = merchant_stats::get_merchant_index_size(&env);
-        let mut pending_merchant_revenues_count = 0;
+        let mut pending_merchant_rev_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_revenues_count += 1;
+                    pending_merchant_rev_count += 1;
                 }
             }
         }
@@ -1686,7 +1707,7 @@ impl FlowPay {
             schema_version,
             fee_collector_set,
             global_volume_utilization_pct,
-            pending_merchant_revenues_count,
+            pending_merchant_rev_count,
         }
     }
 
@@ -1832,6 +1853,19 @@ impl FlowPay {
     // ─────────────────────────────────────────────────────────────
     // Lightweight subscription reads
     // ─────────────────────────────────────────────────────────────
+
+    /// Returns the token address for a user's subscription without decoding
+    /// the full `Subscription` struct.
+    ///
+    /// Returns `Some(token)` when any subscription record exists for `user`
+    /// (including inactive/cancelled ones), and `None` when the user has never
+    /// subscribed.
+    ///
+    /// No auth required (view-only).
+    pub fn get_subscription_token(env: Env, user: Address) -> Option<Address> {
+        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+        Some(sub.token)
+    }
 
     /// Returns just the merchant address for a user's subscription, without
     /// decoding the full `Subscription` struct. Lighter-weight than
