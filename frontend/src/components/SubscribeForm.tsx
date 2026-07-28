@@ -20,6 +20,7 @@ interface Props {
   onSuccess: () => void;
   announce: (message: string) => void;
   onSubscribed?: () => void;
+  isPaused?: boolean;
 }
 
 export default function SubscribeForm({
@@ -28,6 +29,7 @@ export default function SubscribeForm({
   onSuccess,
   announce,
   onSubscribed,
+  isPaused = false,
 }: Props) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
@@ -148,7 +150,7 @@ export default function SubscribeForm({
   }, [amount]);
 
   const pending = tx.status === "pending";
-  const disabled = pending || validating || !isValid;
+  const disabled = pending || validating || !isValid || isPaused;
 
   // Only show errors for touched fields (blur-based inline validation)
   const visibleErrors = {
@@ -289,8 +291,13 @@ export default function SubscribeForm({
         )}
       </div>
 
-      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit" aria-busy={pending || validating}>
-      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit">
+      <button
+        type="submit"
+        disabled={disabled}
+        className="btn-primary subscribe-form__submit"
+        aria-busy={pending || validating}
+        aria-label={isPaused ? "Subscribe (unavailable during maintenance)" : undefined}
+      >
         {pending ? "Confirming…" : validating ? "Validating…" : "Subscribe"}
       </button>
 

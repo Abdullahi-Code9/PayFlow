@@ -23,7 +23,9 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useRegisterShortcuts } from "./context/ShortcutRegistry";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
+import { useContractPaused } from "./hooks/useContractPaused";
 import OfflineBanner from "./components/OfflineBanner";
+import ContractPauseBanner from "./components/ContractPauseBanner";
 import AmountUnitToggle from "./components/AmountUnitToggle";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
@@ -168,6 +170,7 @@ export default function App() {
   const [showRpcSettings, setShowRpcSettings] = useState(false);
   const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
   const isOnline = useNetworkStatus();
+  const { isPaused } = useContractPaused();
 
   const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
   const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
@@ -264,6 +267,9 @@ export default function App() {
 
       {/* Offline banner — shown when navigator.onLine is false */}
       <OfflineBanner visible={!isOnline} />
+
+      {/* Contract pause banner — shown when is_contract_paused returns true */}
+      <ContractPauseBanner paused={isPaused} />
 
       {/* Contract ID error */}
       {!contractIdValid && contractIdError && (
@@ -381,6 +387,7 @@ export default function App() {
                     setRefresh((r) => r + 1);
                   }}
                   announce={announce}
+                  isPaused={isPaused}
                 />
               </ErrorBoundary>
             ) : tab === "merchant" ? (
@@ -398,6 +405,7 @@ export default function App() {
                     merchantKey={publicKey}
                     onSign={signAndSubmit}
                     refreshTrigger={refresh}
+                    isPaused={isPaused}
                   />
                 </Suspense>
               </ErrorBoundary>
@@ -435,6 +443,7 @@ export default function App() {
                   onPayPerUse={(amount) =>
                     track({ type: "pay_per_use", payload: { amountStroops: amount } })
                   }
+                  isPaused={isPaused}
                 />
               </ErrorBoundary>
             )}
