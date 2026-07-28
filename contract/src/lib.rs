@@ -1,5 +1,5 @@
 #![no_std]
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, clippy::inconsistent_digit_grouping)]
 
 mod admin;
 mod batch;
@@ -175,7 +175,7 @@ pub struct HealthReport {
     pub schema_version: u32,
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
-    pub pending_merchant_revenues_count: u32,
+    pub pending_merchant_rev_count: u32,
 }
 
 #[contracttype]
@@ -820,12 +820,6 @@ impl FlowPay {
     /// Returns the default token address set during `initialize()`, or `None` if not initialized.
     pub fn get_token(env: Env) -> Option<Address> {
         storage::get_token(&env)
-    }
-
-    /// Upgrades the current contract WASM to `new_wasm_hash` (test only).
-    #[cfg(test)]
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        upgrade::upgrade(&env, new_wasm_hash);
     }
 
     pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
@@ -1661,11 +1655,11 @@ impl FlowPay {
         let global_volume_utilization_pct = if pct > 100 { 100 } else { pct };
 
         let total_merchants = merchant_stats::get_merchant_index_size(&env);
-        let mut pending_merchant_revenues_count = 0;
+        let mut pending_merchant_rev_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_revenues_count += 1;
+                    pending_merchant_rev_count += 1;
                 }
             }
         }
@@ -1686,7 +1680,7 @@ impl FlowPay {
             schema_version,
             fee_collector_set,
             global_volume_utilization_pct,
-            pending_merchant_revenues_count,
+            pending_merchant_rev_count,
         }
     }
 
@@ -1734,7 +1728,7 @@ impl FlowPay {
     /// # Side Effects
     ///
     /// Moves the subscription struct to `new_user`, removes it from `user`,
-    /// refreshes TTL, and emits `sub_transferred`.
+    /// refreshes TTL, and emits `sub_transferred` and `subscription_transferred`.
     pub fn transfer_subscription(env: Env, user: Address, new_user: Address) {
         ensure_contract_not_paused(&env);
         user.require_auth();
@@ -1769,6 +1763,7 @@ impl FlowPay {
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
+        events::emit_subscription_transferred(&env, &user, &new_user, &sub);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1873,6 +1868,15 @@ impl FlowPay {
             i += 1;
         }
         result
+    }
+}
+
+#[contractimpl]
+#[cfg(test)]
+impl FlowPay {
+    /// Upgrades the current contract WASM to `new_wasm_hash` (test only).
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        upgrade::upgrade(&env, new_wasm_hash);
     }
 }
 
