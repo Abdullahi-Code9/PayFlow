@@ -5892,6 +5892,158 @@ fn test_batch_pause_subscriptions_exceeds_max_size_panics() {
     client.batch_pause_subscriptions(&users);
 }
 
+#[test]
+fn test_admin_batch_cancel_subscriptions_cancels_multiple_accounts() {
+    let (env, contract_id, token_addr, user_a, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let user_b = setup_funded_user(&env, &contract_id, &token_addr);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user_a);
+    });
+
+    client.subscribe(
+        &user_a,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.subscribe(
+        &user_b,
+        &merchant,
+        &2_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let mut users = Vec::new(&env);
+    users.push_back(user_a.clone());
+    users.push_back(user_b.clone());
+
+    let results = client.batch_cancel(&users);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results.get(0).unwrap(), CancelResult::Cancelled);
+    assert_eq!(results.get(1).unwrap(), CancelResult::Cancelled);
+    assert!(!client.get_subscription(&user_a).unwrap().active);
+    assert!(!client.get_subscription(&user_b).unwrap().active);
+    assert_eq!(count_user_events(&env, "cancelled", &user_a), 1);
+    assert_eq!(count_user_events(&env, "cancelled", &user_b), 1);
+}
+
+#[test]
+#[should_panic]
+fn test_batch_cancel_requires_admin_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, FlowPay);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    let mut users = Vec::new(&env);
+    users.push_back(user);
+
+    client.batch_cancel(&users);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_batch_cancel_exceeds_max_size_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    for _ in 0..26 {
+        users.push_back(Address::generate(&env));
+    }
+    client.batch_cancel(&users);
+}
+
+#[test]
+fn test_batch_cancel_handles_mixed_states_and_clears_referral() {
+    let (env, contract_id, token_addr, user_a, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let user_b = setup_funded_user(&env, &contract_id, &token_addr);
+    let user_c = setup_funded_user(&env, &contract_id, &token_addr);
+    let missing_user = Address::generate(&env);
+    let referrer = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user_a);
+    });
+
+    client.subscribe(
+        &user_a,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &Some(referrer.clone()),
+    );
+    client.subscribe(
+        &user_b,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.pause(&user_b);
+    client.subscribe(
+        &user_c,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.cancel(&user_c);
+
+    assert_eq!(client.get_referrer(&user_a), Some(referrer));
+
+    let mut users = Vec::new(&env);
+    users.push_back(user_a.clone());
+    users.push_back(user_b.clone());
+    users.push_back(user_c.clone());
+    users.push_back(missing_user.clone());
+
+    let results = client.batch_cancel(&users);
+
+    assert_eq!(results.len(), 4);
+    assert_eq!(results.get(0).unwrap(), CancelResult::Cancelled);
+    assert_eq!(results.get(1).unwrap(), CancelResult::Cancelled);
+    assert_eq!(results.get(2).unwrap(), CancelResult::AlreadyCancelled);
+    assert_eq!(results.get(3).unwrap(), CancelResult::NoSubscription);
+
+    assert!(!client.get_subscription(&user_a).unwrap().active);
+    assert!(!client.get_subscription(&user_b).unwrap().active);
+    assert!(!client.get_subscription(&user_c).unwrap().active);
+    assert!(client.get_subscription(&missing_user).is_none());
+
+    assert_eq!(client.get_referrer(&user_a), None);
+
+    assert_eq!(count_user_events(&env, "cancelled", &user_a), 1);
+    assert_eq!(count_user_events(&env, "cancelled", &user_b), 1);
+    assert_eq!(count_user_events(&env, "cancelled", &user_c), 1);
+}
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // CONTRACT-07: get_merchant_sub_count tests
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

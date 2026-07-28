@@ -30,6 +30,7 @@ use soroban_sdk::{
 };
 
 pub use batch::ChargeResult;
+pub use batch::CancelResult;
 pub use charge_exec::ChargeSimResult;
 
 // ─────────────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ pub struct ContractConfig {
 // Contract
 // ─────────────────────────────────────────────────────────────
 
-fn cancel_inner(env: &Env, user: &Address) -> Subscription {
+pub(crate) fn cancel_inner(env: &Env, user: &Address) -> Subscription {
     let key = DataKey::Subscription(user.clone());
     let mut sub: Subscription = env
         .storage()
@@ -779,6 +780,11 @@ impl FlowPay {
                 events::publish_subscription_paused(&env, &user);
             }
         }
+    }
+
+    pub fn batch_cancel(env: Env, users: Vec<Address>) -> Vec<CancelResult> {
+        admin::require_admin(&env);
+        batch::batch_cancel(&env, users)
     }
 
     /// Proposes a new admin (step 1 of two-step transfer).
