@@ -36,10 +36,6 @@ pub fn simulate_charge(env: &Env, user: Address) -> ChargeSimResult {
         Some(s) => s,
     };
 
-    if !sub.active {
-        return ChargeSimResult::Inactive;
-    }
-
     let now = env.ledger().timestamp();
 
     if sub.paused {
@@ -47,15 +43,17 @@ pub fn simulate_charge(env: &Env, user: Address) -> ChargeSimResult {
         if let Some(expiry_ts) = storage::get_pause_expiry(env, &user) {
             if now >= expiry_ts {
                 sub.paused = false;
-                if now > sub.last_charged {
-                    sub.last_charged = now;
-                }
+                sub.active = true;
                 auto_resumed = true;
             }
         }
         if !auto_resumed {
             return ChargeSimResult::SubscriptionPaused;
         }
+    }
+
+    if !sub.active {
+        return ChargeSimResult::Inactive;
     }
 
     let next = match compute_next_charge_at(&sub) {
@@ -100,9 +98,7 @@ pub fn try_auto_resume(env: &Env, user: &Address, sub: &mut Subscription, now: u
         if let Some(expiry_ts) = expiry {
             if now >= expiry_ts {
                 sub.paused = false;
-                if now > sub.last_charged {
-                    sub.last_charged = now;
-                }
+                sub.active = true;
                 env.storage().persistent().set(&DataKey::Subscription(user.clone()), sub);
                 storage::clear_pause_expiry(env, user);
                 events::publish_subscription_auto_resumed(env, user);
@@ -120,10 +116,10 @@ pub fn precheck_charge(
     grace_period: u64,
 ) -> Result<(), ChargeResult> {
     let next = compute_next_charge_at(sub).ok_or({
-        if !sub.active {
-            ChargeResult::Inactive
-        } else {
+        if sub.paused {
             ChargeResult::Paused
+        } else {
+            ChargeResult::Inactive
         }
     })?;
     if now < next {
