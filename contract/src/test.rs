@@ -18,6 +18,9 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
@@ -5264,12 +5267,19 @@ fn test_subscribe_zero_allowance_panics() {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
 
     let sac = StellarAssetClient::new(&env, &token_addr);
     sac.mint(&user, &10_000_0000000);
+
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     // Deliberately grant zero allowance â€” no approve() call.
     let client = FlowPayClient::new(&env, &contract_id);
@@ -5300,6 +5310,9 @@ fn test_subscribe_zero_allowance_does_not_write_storage() {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
 
@@ -5335,6 +5348,10 @@ fn test_subscribe_exact_allowance_succeeds() {
 
     let amount: i128 = 5_0000000;
 
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
+
     // Approve exactly amount â€” no more, no less.
     let token = TokenClient::new(&env, &token_addr);
     token.approve(&user, &contract_id, &amount, &200);
@@ -5368,6 +5385,10 @@ fn test_resubscribe_zero_allowance_panics() {
     sac.mint(&user, &10_000_0000000);
 
     let amount: i128 = 1_0000000;
+
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     // First subscribe with sufficient allowance.
     let token = TokenClient::new(&env, &token_addr);
