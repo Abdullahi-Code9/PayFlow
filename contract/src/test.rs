@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(clippy::bool_assert_comparison, unused_variables, dead_code, clippy::inconsistent_digit_grouping)]
 
 use super::*;
 use soroban_sdk::{
@@ -5167,6 +5168,50 @@ fn test_transfer_subscription_succeeds() {
     assert!(new_sub.active, "new subscription should be active");
     assert_eq!(new_sub.merchant, merchant);
     assert_eq!(new_sub.amount, 1_0000000);
+}
+
+#[test]
+fn test_transfer_subscription_event_emitted() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let new_user = Address::generate(&env);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&new_user, &10_000_0000000);
+    let token = TokenClient::new(&env, &token_addr);
+    token.approve(&new_user, &contract_id, &10_000_0000000, &200);
+
+    client.transfer_subscription(&user, &new_user);
+
+    let mut seen_transfer_event = false;
+    for (_, topics, data) in env.events().all().iter() {
+        let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic_symbol == Symbol::new(&env, "subscription_transferred") {
+            let topic_from: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            let topic_to: Address = topics.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic_from, user);
+            assert_eq!(topic_to, new_user);
+
+            let event_payload: (Address, i128, u64, Address) = data.try_into_val(&env).unwrap();
+            assert_eq!(event_payload.0, merchant);
+            assert_eq!(event_payload.1, 1_0000000);
+            assert_eq!(event_payload.2, 86400);
+            assert_eq!(event_payload.3, token_addr);
+            seen_transfer_event = true;
+        }
+    }
+
+    assert!(seen_transfer_event, "expected a subscription_transferred event");
 }
 
 #[test]

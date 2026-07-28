@@ -171,6 +171,18 @@ pub fn publish_subscription_transferred(env: &Env, old_user: &Address, new_user:
     );
 }
 
+pub fn emit_subscription_transferred(
+    env: &Env,
+    from: &Address,
+    to: &Address,
+    sub: &Subscription,
+) {
+    env.events().publish(
+        (Symbol::new(env, "subscription_transferred"), from.clone(), to.clone()),
+        (sub.merchant.clone(), sub.amount, sub.interval, sub.token.clone()),
+    );
+}
+
 pub fn publish_upgraded(env: &Env, _new_wasm_hash: &BytesN<32>) {
     env.events().publish((Symbol::new(env, "upgrade"),), ());
 }
