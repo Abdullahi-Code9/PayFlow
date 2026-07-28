@@ -1,21 +1,28 @@
-import React, { useState, useEffect, useRef } from "react";
-import { buildCancelTx, buildPayPerUseTx } from "../stellar";
+import React, { useState, useRef, useCallback, lazy, Suspense } from "react";
+import { buildPayPerUseTx } from "../stellar";
 import { friendlyError } from "../utils/errors";
 import SubscriptionCard from "./SubscriptionCard";
 import SubscriptionCardSkeleton from "./Skeleton";
-import SubscriptionHistory from "./SubscriptionHistory";
+import ErrorBoundary from "./ErrorBoundary";
+import ErrorRecovery from "./ErrorRecovery";
+
+
+// Lazy-load SubscriptionHistory so it is excluded from the main chunk (Issue #445).
+const SubscriptionHistory = lazy(() => import("./SubscriptionHistory"));
 import PayPerUseForm from "./PayPerUseForm";
-import ConfirmModal from "./ConfirmModal";
 import DailyLimitCard from "./DailyLimitCard";
 import DailyLimitModal from "./DailyLimitModal";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import AllowanceDisplay from "./AllowanceDisplay";
+import ReferralPanel from "./ReferralPanel";
 import ToastContainer from "./Toast";
-import { useSubscription } from "../hooks/useSubscription";
+import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePolling } from "../hooks/usePolling";
 import { useToast } from "../hooks/useToast";
 import { useRpcHealth } from "../hooks/useRpcHealth";
 import { useTransaction } from "../hooks/useTransaction";
+import { useResponsive } from "../hooks/useResponsive";
+import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 
 interface Props {
   userKey: string;
@@ -26,13 +33,19 @@ interface Props {
   onPayPerUse?: (amount: bigint) => void;
 }
 
-export default function Dashboard({ userKey, onSign, refreshTrigger, announce, onCancelled, onPayPerUse }: Props) {
-  const { subscription: sub, loading, refresh } = useSubscription(userKey, refreshTrigger);
+export default function Dashboard({
+  userKey,
+  onSign,
+  refreshTrigger,
+  announce,
+  onCancelled,
+  onPayPerUse,
+}: Props) {
+  const { subscription: sub, loading, refresh } = useSubscriptionSync(userKey, refreshTrigger);
   const { toasts, addToast, removeToast } = useToast();
-  const { healthy: rpcHealthy, error: rpcError } = useRpcHealth();
-  const cancelTx = useTransaction();
+  const { status: rpcStatus, latencyMs: rpcLatency, error: rpcError } = useRpcHealth();
+  const { isMobile } = useResponsive();
   const ppuTx = useTransaction();
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showDailyLimit, setShowDailyLimit] = useState(false);
   const [showIncreaseAllowance, setShowIncreaseAllowance] = useState(false);
   const [allowanceRefresh, setAllowanceRefresh] = useState(0);
@@ -41,73 +54,50 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce, o
 
   usePolling({ callback: refresh, interval: 30000, enabled: !!sub?.active });
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      const key = e.key.toLowerCase();
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
+  useRegisterShortcuts(
+    sub?.active
+      ? [
+          {
+            key: "p",
+            description: "Focus pay-per-use amount input",
+            action: () => {
+              ppuInputRef.current?.focus();
+            },
+          },
+        ]
+      : []
+  );
+
+  const handlePayPerUse = useCallback(
+    async (stroops: bigint) => {
+      announce("Transaction submitted");
+      try {
+        const hash = await ppuTx.submit(async () => {
+          const xdr = await buildPayPerUseTx(userKey, stroops);
+          return onSign(xdr);
+        });
+        addToast("Paid!", "success", hash);
+        announce("Transaction confirmed");
+        onPayPerUse?.(stroops);
+      } catch (e: unknown) {
+        const msg = `Error: ${friendlyError(e instanceof Error ? e.message : String(e))}`;
+        addToast(msg, "error");
+        announce(msg);
       }
-
-      if (key === "x" && sub?.active && !showConfirm) {
-        e.preventDefault();
-        setShowConfirm(true);
-      }
-
-      if (key === "p" && sub?.active) {
-        e.preventDefault();
-        ppuInputRef.current?.focus();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [sub?.active, showConfirm]);
-
-  async function performCancel() {
-    setShowConfirm(false);
-    announce("Transaction submitted");
-    try {
-      const hash = await cancelTx.submit(async () => {
-        const xdr = await buildCancelTx(userKey);
-        return onSign(xdr);
-      });
-      addToast("Cancelled.", "success", hash);
-      announce("Transaction confirmed");
-      onCancelled?.();
-      refresh();
-    } catch (e: unknown) {
-      const msg = `Error: ${friendlyError(e instanceof Error ? e.message : String(e))}`;
-      addToast(msg, "error");
-      announce(msg);
-    }
-  }
-
-  async function handlePayPerUse(stroops: bigint) {
-    announce("Transaction submitted");
-    try {
-      const hash = await ppuTx.submit(async () => {
-        const xdr = await buildPayPerUseTx(userKey, stroops);
-        return onSign(xdr);
-      });
-      addToast("Paid!", "success", hash);
-      announce("Transaction confirmed");
-      onPayPerUse?.(stroops);
-    } catch (e: unknown) {
-      const msg = `Error: ${friendlyError(e instanceof Error ? e.message : String(e))}`;
-      addToast(msg, "error");
-      announce(msg);
-    }
-  }
+    },
+    [userKey, onSign, announce, addToast, onPayPerUse, ppuTx]
+  );
 
   if (loading)
     return (
       <>
-        {!rpcHealthy && rpcError && (
+        {rpcStatus === "degraded" && (
+          <div className="network-warning network-warning--degraded" role="alert">
+            <span>⚠️</span>
+            <span>RPC connection degraded: Latency is high ({rpcLatency}ms)</span>
+          </div>
+        )}
+        {rpcStatus === "unreachable" && rpcError && (
           <div className="network-warning" role="alert">
             <span>⚠️</span>
             <span>RPC endpoint unreachable: {rpcError}</span>
@@ -117,12 +107,17 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce, o
       </>
     );
 
-  const cancelPending = cancelTx.status === "pending";
   const ppuPending = ppuTx.status === "pending";
 
   return (
-    <div className="dashboard">
-      {!rpcHealthy && rpcError && (
+    <div className={`dashboard${isMobile ? " dashboard--mobile" : ""}`}>
+      {rpcStatus === "degraded" && (
+        <div className="network-warning network-warning--degraded" role="alert">
+          <span>⚠️</span>
+          <span>RPC connection degraded: Latency is high ({rpcLatency}ms)</span>
+        </div>
+      )}
+      {rpcStatus === "unreachable" && rpcError && (
         <div className="network-warning" role="alert">
           <span>⚠️</span>
           <span>RPC endpoint unreachable: {rpcError}</span>
@@ -137,14 +132,10 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce, o
           <SubscriptionCard
             subscription={sub}
             userKey={userKey}
-            onCancel={() => setShowConfirm(true)}
-            onPause={onSign}
+            onSign={onSign}
             onRefresh={refresh}
+            onCancelled={onCancelled}
           />
-
-          {cancelPending && (
-            <p className="status-text status-text--pending">Confirming cancellation…</p>
-          )}
 
           {sub.active && (
             <>
@@ -164,16 +155,27 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce, o
                   refreshTrigger={dailyLimitRefresh}
                   onOpen={() => setShowDailyLimit(true)}
                 />
-
               </div>
 
-              <SubscriptionHistory userKey={userKey} />
+              <ErrorBoundary>
+                <Suspense fallback={<SubscriptionCardSkeleton />}>
+                  <SubscriptionHistory userKey={userKey} />
+                </Suspense>
+              </ErrorBoundary>
               <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} />
               {ppuPending && (
                 <p className="status-text status-text--pending">Confirming payment…</p>
               )}
+              <ErrorRecovery
+                error={ppuTx.error}
+                onIncreaseAllowance={() => setShowIncreaseAllowance(true)}
+                onViewDailyLimit={() => setShowDailyLimit(true)}
+                dailyLimit={sub.amount} // We don't have exactly the daily limit fetched, but could be fetched or omitted.
+              />
+              <ReferralPanel publicKey={userKey} />
             </>
           )}
+
         </>
       )}
 
@@ -189,14 +191,6 @@ export default function Dashboard({ userKey, onSign, refreshTrigger, announce, o
             setDailyLimitRefresh((value) => value + 1);
           }}
           announce={announce}
-        />
-      )}
-
-      {showConfirm && (
-        <ConfirmModal
-          message="Are you sure you want to cancel your subscription? This cannot be undone."
-          onConfirm={performCancel}
-          onCancel={() => setShowConfirm(false)}
         />
       )}
 

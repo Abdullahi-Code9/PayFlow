@@ -1,9 +1,27 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { getMerchantSubscribers, type MerchantSubscriber, buildBatchChargeTx, simulateBatchCharge, type BatchChargeOutcome, getMerchantRevenue, getMerchantRevenueHistory } from "../stellar";
-import { formatAddress, formatXlm } from "../utils/format";
+import {
+  getMerchantSubscribers,
+  type MerchantSubscriber,
+  buildBatchChargeTx,
+  simulateBatchCharge,
+  type BatchChargeOutcome,
+  getMerchantRevenue,
+  getMerchantRevenueHistory,
+} from "../stellar";
+import { formatAddress } from "../utils/format";
+import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import { usePolling } from "../hooks/usePolling";
 import { useTransaction } from "../hooks/useTransaction";
+import { useVirtualList } from "../hooks/useVirtualList";
+import { useResponsive } from "../hooks/useResponsive";
 import CopyButton from "./CopyButton";
+import RevenueSparkline from "./RevenueSparkline";
+import { MerchantSubscriberSkeleton } from "./Skeleton";
+import ErrorRecovery from "./ErrorRecovery";
+
+
+const SUBSCRIBER_ROW_HEIGHT = 72;
+const SUBSCRIBER_LIST_HEIGHT = 400;
 
 interface Props {
   merchantKey: string;
@@ -16,11 +34,7 @@ function formatNextCharge(nextChargeAt: number): string {
   return date.toLocaleString();
 }
 
-export default function MerchantDashboard({
-  merchantKey,
-  onSign,
-  refreshTrigger,
-}: Props) {
+export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger }: Props) {
   const [subscribers, setSubscribers] = useState<MerchantSubscriber[]>([]);
   const [revenue, setRevenue] = useState<bigint>(0n);
   const [revenueHistory, setRevenueHistory] = useState<bigint[]>([]);
@@ -28,10 +42,15 @@ export default function MerchantDashboard({
   const [error, setError] = useState<string | null>(null);
 
   const tx = useTransaction();
+  const { isMobile } = useResponsive();
+  const { displayCurrentAmount } = useAmountDisplay();
   const [outcomes, setOutcomes] = useState<Record<string, BatchChargeOutcome>>({});
 
-  const dueSubscribers = subscribers.filter(
-    (s) => s.nextChargeAt <= Math.floor(Date.now() / 1000)
+  const dueSubscribers = subscribers.filter((s) => s.nextChargeAt <= Math.floor(Date.now() / 1000));
+  const virtualSubscribers = useVirtualList(
+    subscribers,
+    SUBSCRIBER_ROW_HEIGHT,
+    SUBSCRIBER_LIST_HEIGHT
   );
 
   const refresh = useCallback(async () => {
@@ -84,7 +103,7 @@ export default function MerchantDashboard({
       });
 
       // 3. Success — refresh list to show updated next charge times
-      setTimeout(refresh, 2000);
+      window.setTimeout(refresh, 2000);
     } catch (e) {
       console.error("Batch charge failed:", e);
     }
@@ -93,21 +112,29 @@ export default function MerchantDashboard({
   if (loading) {
     return (
       <div className="dashboard">
-        <p className="text-muted">Loading merchant subscribers…</p>
+        <div className="flex-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold">Merchant Dashboard</h2>
+            <p className="text-sm text-muted">Manage your subscribers and track your revenue.</p>
+          </div>
+        </div>
+        <div className="card merchant-subscriber-card">
+          <div className="subscription-rows merchant-subscriber-list">
+            <MerchantSubscriberSkeleton />
+            <MerchantSubscriberSkeleton />
+            <MerchantSubscriberSkeleton />
+          </div>
+        </div>
       </div>
     );
   }
 
-  const maxRevenue = revenueHistory.reduce((a, b) => (a > b ? a : b), 1n);
-
   return (
-    <div className="dashboard">
+    <div className={`dashboard${isMobile ? " dashboard--mobile" : ""}`}>
       <div className="flex-between mb-4">
         <div>
           <h2 className="text-xl font-bold">Merchant Dashboard</h2>
-          <p className="text-sm text-muted">
-            Manage your subscribers and track your revenue.
-          </p>
+          <p className="text-sm text-muted">Manage your subscribers and track your revenue.</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-secondary" onClick={refresh}>
@@ -116,46 +143,25 @@ export default function MerchantDashboard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className={`merchant-stats-grid grid gap-4 mb-6${isMobile ? " grid-cols-1" : " grid-cols-2"}`}>
         <div className="card">
           <span className="text-sm text-muted block mb-1">Total Revenue</span>
-          <span className="text-2xl font-bold">{formatXlm(revenue)}</span>
+          <span className="text-2xl font-bold">{displayCurrentAmount(revenue)}</span>
         </div>
         <div className="card">
           <span className="text-sm text-muted block mb-2">Last 7 Days Revenue</span>
-          <div className="flex items-end gap-1" style={{ height: "40px" }}>
-            {revenueHistory.length === 0 ? (
-              <p className="text-xs text-muted">No data</p>
-            ) : (
-              revenueHistory.map((dayRev, i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: `${Math.max(Number((dayRev * 100n) / maxRevenue), 5)}%`,
-                    flex: 1,
-                    backgroundColor: "var(--color-primary)",
-                    borderRadius: "2px",
-                    opacity: 0.8,
-                  }}
-                  title={formatXlm(dayRev)}
-                />
-              ))
-            )}
-          </div>
+          <RevenueSparkline history={revenueHistory} />
         </div>
       </div>
 
       {error && (
-        <p className="action-status mb-4" style={{ color: "var(--color-danger)" }}>
-          Error: {error}
-        </p>
+        <ErrorRecovery error={error} />
       )}
 
       {tx.error && (
-        <p className="action-status mb-4" style={{ color: "var(--color-danger)" }}>
-          Transaction Error: {tx.error}
-        </p>
+        <ErrorRecovery error={tx.error} />
       )}
+
 
       {subscribers.length === 0 ? (
         <div className="card">
@@ -168,13 +174,9 @@ export default function MerchantDashboard({
           <div className="merchant-subscriber-meta mb-4">
             <h3 className="text-lg font-bold">Active Subscribers</h3>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted">
-                {subscribers.length} total
-              </span>
+              <span className="text-sm text-muted">{subscribers.length} total</span>
               {dueSubscribers.length > 0 && (
-                <span className="badge badge-warning">
-                  {dueSubscribers.length} due
-                </span>
+                <span className="badge badge-warning">{dueSubscribers.length} due</span>
               )}
             </div>
           </div>
@@ -200,32 +202,51 @@ export default function MerchantDashboard({
             </div>
           )}
 
-          <div className="subscription-rows merchant-subscriber-list">
-            {subscribers.map((entry) => (
-              <div className="subscription-row merchant-subscriber-row" key={entry.subscriber}>
-                <div className="merchant-row">
-                  <span className="merchant-row__address">
-                    {formatAddress(entry.subscriber)}
-                  </span>
-                  <CopyButton text={entry.subscriber} />
-                </div>
-                <div className="merchant-subscriber-value">
-                  <span className="subscription-row__value">
-                    {formatXlm(entry.amount)}
-                  </span>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="subscription-row__label">
-                      Next charge {formatNextCharge(entry.nextChargeAt)}
-                    </span>
-                    {outcomes[entry.subscriber] && (
-                      <span className={`badge badge-${outcomes[entry.subscriber].toLowerCase()}`}>
-                        {outcomes[entry.subscriber]}
+          <div
+            className="subscription-rows merchant-subscriber-list"
+            onScroll={virtualSubscribers.onScroll}
+            style={{ height: SUBSCRIBER_LIST_HEIGHT }}
+          >
+            <div
+              className="merchant-subscriber-list__spacer"
+              style={{ height: virtualSubscribers.totalHeight }}
+            >
+              <div
+                className="merchant-subscriber-list__window"
+                style={{ transform: `translateY(${virtualSubscribers.offsetY}px)` }}
+              >
+                {virtualSubscribers.visibleItems.map(({ item: entry, index }) => (
+                  <div
+                    className={`subscription-row merchant-subscriber-row${
+                      index === subscribers.length - 1 ? " merchant-subscriber-row--last" : ""
+                    }`}
+                    key={entry.subscriber}
+                  >
+                    <div className="merchant-row">
+                      <span className="merchant-row__address">
+                        {formatAddress(entry.subscriber)}
                       </span>
-                    )}
+                      <CopyButton text={entry.subscriber} />
+                    </div>
+                    <div className="merchant-subscriber-value">
+                      <span className="subscription-row__value">{displayCurrentAmount(entry.amount)}</span>
+                      <div className="merchant-subscriber-meta-right">
+                        <span className="subscription-row__label">
+                          Next charge {formatNextCharge(entry.nextChargeAt)}
+                        </span>
+                        {outcomes[entry.subscriber] && (
+                          <span
+                            className={`badge badge-${outcomes[entry.subscriber].toLowerCase()}`}
+                          >
+                            {outcomes[entry.subscriber]}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </div>
       )}

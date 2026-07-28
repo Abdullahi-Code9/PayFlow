@@ -1,10 +1,17 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../stellar");
 vi.mock("../hooks/usePolling", () => ({ usePolling: () => {} }));
+
+// MerchantSubscriberTable uses CopyButton — mock it to keep tests simple
+vi.mock("../components/CopyButton", () => ({
+  default: ({ ariaLabel }: { ariaLabel?: string }) => (
+    <button aria-label={ariaLabel ?? "Copy"}>Copy</button>
+  ),
+}));
 
 vi.mock("../hooks/useTransaction", () => ({
   useTransaction: vi.fn(() => ({
@@ -27,12 +34,14 @@ import * as stellar from "../stellar";
 import { useTransaction } from "../hooks/useTransaction";
 import MerchantDashboard from "../components/MerchantDashboard";
 
+const NOW = Math.floor(Date.now() / 1000);
+
 const SAMPLE_SUBSCRIBER = {
   subscriber: "GTESTER000000000000000000000000000000000000000000",
   amount: "10000000",
   interval: 2592000,
-  lastCharged: 0,
-  nextChargeAt: 2592000,
+  lastCharged: NOW - 2592000,
+  nextChargeAt: NOW + 2592000, // future → active
 };
 
 describe("MerchantDashboard", () => {
@@ -54,11 +63,20 @@ describe("MerchantDashboard", () => {
 
     await waitFor(() => expect(screen.getByText(/Merchant Dashboard/)).toBeTruthy());
 
+    // Table renders truncated address via formatAddress(addr, 8, 6)
+    expect(screen.getByText("GTESTER0…000000")).toBeTruthy();
+    // Amount column shows XLM value
     expect(screen.getByText("10.0000000 XLM")).toBeTruthy(); // Total Revenue
     expect(screen.getByText("GTESTE…0000")).toBeTruthy();
     expect(screen.getByText("1.0000000 XLM")).toBeTruthy();
-    expect(screen.getByText(/Next charge/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /copy address/i })).toBeTruthy();
+    // Status badge shows Active (nextChargeAt is in the future)
+    expect(screen.getByText("Active")).toBeTruthy();
+    // CopyButton rendered for the subscriber address
+    expect(
+      screen.getByRole("button", {
+        name: /copy subscriber address GTESTER000000000000000000000000000000000000000000/i,
+      })
+    ).toBeTruthy();
   });
 
   it("shows an empty state when there are no active subscribers", async () => {
@@ -67,7 +85,27 @@ describe("MerchantDashboard", () => {
 
     render(<MerchantDashboard merchantKey="GMERCHANT" onSign={onSign} refreshTrigger={0} />);
 
-    await waitFor(() => expect(screen.getByText(/No active subscribers found/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/No subscribers yet/i)).toBeTruthy()
+    );
+  });
+
+  it("renders a virtualized window for large subscriber lists", async () => {
+    const manySubscribers = Array.from({ length: 200 }, (_, index) => ({
+      ...SAMPLE_SUBSCRIBER,
+      subscriber: `GUSER${String(index).padStart(51, "0")}`,
+    }));
+    vi.mocked(stellar.getMerchantSubscribers).mockResolvedValue(manySubscribers);
+    const onSign = vi.fn();
+
+    const { container } = render(
+      <MerchantDashboard merchantKey="GMERCHANT" onSign={onSign} refreshTrigger={0} />
+    );
+
+    await waitFor(() => expect(screen.getByText("200 total")).toBeTruthy());
+
+    const renderedRows = container.querySelectorAll(".merchant-subscriber-row");
+    expect(renderedRows.length).toBeLessThanOrEqual(20);
   });
 
   it("enables the batch charge button when subscribers are due", async () => {
@@ -80,7 +118,9 @@ describe("MerchantDashboard", () => {
 
     render(<MerchantDashboard merchantKey="GMERCHANT" onSign={onSign} refreshTrigger={0} />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /Charge 1 due subscriber/i })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Charge 1 due subscriber/i })).toBeTruthy()
+    );
   });
 
   it("processes a batch charge and shows success message", async () => {
@@ -112,7 +152,9 @@ describe("MerchantDashboard", () => {
 
     await userEvent.click(button);
 
-    await waitFor(() => expect(screen.getByText(/Batch charge submitted successfully!/i)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/Batch charge submitted successfully!/i)).toBeTruthy()
+    );
     expect(screen.getByText("Charged")).toBeTruthy();
     expect(stellar.simulateBatchCharge).toHaveBeenCalled();
     expect(stellar.buildBatchChargeTx).toHaveBeenCalled();

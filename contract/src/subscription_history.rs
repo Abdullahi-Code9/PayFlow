@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::DataKey;
+use crate::{DataKey, SUBSCRIPTION_TTL_LEDGERS};
 
 /// Maximum number of charge timestamps retained per subscriber.
 const MAX_HISTORY: u32 = 12;
@@ -29,9 +29,38 @@ pub fn record_charge(env: &Env, user: &Address, timestamp: u64) {
 
     history.push_back(timestamp);
 
+    let key = DataKey::ChargeHistory(user.clone());
+    env.storage().persistent().set(&key, &history);
+    env.storage().persistent().extend_ttl(
+        &key,
+        SUBSCRIPTION_TTL_LEDGERS / 2,
+        SUBSCRIPTION_TTL_LEDGERS,
+    );
+}
+
+/// Removes the ChargeHistory entry for a subscriber entirely.
+pub fn prune_charge_history(env: &Env, user: &Address) {
     env.storage()
         .persistent()
-        .set(&DataKey::ChargeHistory(user.clone()), &history);
+        .remove(&DataKey::ChargeHistory(user.clone()));
+}
+
+/// Returns the current TTL (in ledgers) of the ChargeHistory entry, or 0 if absent.
+pub fn get_charge_history_ttl(_env: &Env, _user: &Address) -> u32 {
+    #[cfg(any(test, feature = "testutils"))]
+    {
+        use soroban_sdk::testutils::storage::Persistent;
+        let key = DataKey::ChargeHistory(_user.clone());
+        if _env.storage().persistent().has(&key) {
+            _env.storage().persistent().get_ttl(&key)
+        } else {
+            0
+        }
+    }
+    #[cfg(not(any(test, feature = "testutils")))]
+    {
+        0
+    }
 }
 
 /// Clears the stored charge history for a subscriber.
@@ -42,9 +71,28 @@ pub fn clear_charge_history(env: &Env, user: &Address) {
 }
 
 /// Returns a paginated slice of charge timestamps for a subscriber.
-/// `limit` is capped at 12.
-pub fn get_charge_history_page(env: &Env, user: &Address, offset: u32, limit: u32) -> Vec<u64> {
+/// `limit` is capped at 12. If `ascending` is false, records are returned in descending order (newest first).
+pub fn get_charge_history_page(
+    env: &Env,
+    user: &Address,
+    offset: u32,
+    limit: u32,
+    ascending: bool,
+) -> Vec<u64> {
     let history = get_charge_history(env, user);
+    let mut ordered_history = Vec::new(env);
+
+    let total = history.len();
+    if !ascending && total > 0 {
+        let mut i = total;
+        while i > 0 {
+            i -= 1;
+            ordered_history.push_back(history.get(i).unwrap());
+        }
+    } else {
+        ordered_history = history;
+    }
+
     let mut page = Vec::new(env);
 
     let effective_limit = if limit > MAX_HISTORY {
@@ -53,19 +101,19 @@ pub fn get_charge_history_page(env: &Env, user: &Address, offset: u32, limit: u3
         limit
     };
 
-    let total = history.len();
-    if offset >= total {
+    let total_ordered = ordered_history.len();
+    if offset >= total_ordered {
         return page;
     }
 
-    let end = if offset + effective_limit > total {
-        total
+    let end = if offset + effective_limit > total_ordered {
+        total_ordered
     } else {
         offset + effective_limit
     };
 
     for i in offset..end {
-        page.push_back(history.get(i).unwrap());
+        page.push_back(ordered_history.get(i).unwrap());
     }
 
     page

@@ -42,8 +42,30 @@ pub enum ContractError {
     ContractPaused = 18,
     /// Returned when a subscription interval is below the minimum permitted floor
     IntervalTooShort = 19,
+    /// Returned when the batch size exceeds the maximum allowed
+    BatchTooLarge = 20,
     /// Returned when a merchant attempts to withdraw with no accrued revenue
-    ZeroBalanceAvailable = 20,
-    /// Returned when the contract's own address is supplied as a fee collector
+    ZeroBalanceAvailable = 21,
+    /// Returned when attempting to subscribe to a frozen merchant
+    MerchantFrozen = 22,
+    /// Returned when a two-step commit is attempted without a pending proposal
+    NoPendingProposal = 23,
+    /// Returned when attempting to transfer to an address that already has an active subscription
+    SubscriptionAlreadyActive = 24,
+    /// Returned when a pay_per_use call would exceed the user's daily spending limit
+    DailyLimitExceeded = 25,
+    /// Returned when the fee collector address is invalid (e.g. the contract's own address)
     InvalidFeeCollector = 26,
+    /// Returned when pause_until expiry_timestamp is not strictly in the future
+    InvalidPauseExpiry = 27,
+    GlobalVolumeExceeded = 28,
+    /// Returned when a configured batch limit is invalid
+    InvalidBatchSize = 29,
+    ContractPausedError = 30,
+    /// Returned when a provided recipient address is invalid (e.g., contract address)
+    InvalidRecipient = 32,
+    /// Returned when a configured global volume cap is not positive
+    InvalidVolumeCap = 33,
+    /// Returned when configured fee bounds are inconsistent (min > max, or max > 10000)
+    InvalidFeeBounds = 34,
 }
