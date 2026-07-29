@@ -219,3 +219,42 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 - Developer Integration Guide: [`docs/INTEGRATION-GUIDE.md`](docs/INTEGRATION-GUIDE.md)
 - Mainnet deployment checklist: [`docs/MAINNET-DEPLOYMENT.md`](docs/MAINNET-DEPLOYMENT.md)
 - Merchant Integration Cookbook: [`docs/MERCHANT-INTEGRATION.md`](docs/MERCHANT-INTEGRATION.md)
+
+---
+
+## Subscriber Churn Analysis Dashboard
+
+The **Subscriber Churn Analysis Dashboard** script offers detailed cohort-based monthly retention metrics, merchant-level churn breakdown, and future churn projections.
+
+### Features
+- **Data Ingestion with Graceful Fallback**: Automatically reads from your local SQLite indexer database if available, and gracefully falls back to querying on-chain Soroban RPC events otherwise.
+- **Monthly Cohort Tracking**: Groups subscribers by initial subscription month to compute 30-day and 90-day active counts and retention rates. Includes data guarding that flags younger cohorts as `"insufficient data"`.
+- **Merchant Churn Breakdown**: Identifies the Top 5 high-churn merchants while automatically filtering out single-subscriber merchants (`subscribers <= 1`) to eliminate statistical skew.
+- **Historical Churn Projection**: Analyzes historical monthly average churn rates of completed cohorts and applies them to current active subscribers to project the next month's churn.
+- **Dual Formats**: Outputs reports in raw JSON or formatted CSV tables.
+
+### Usage
+
+Run the script using `ts-node` or `tsx` from the `scripts` or root directory:
+
+```bash
+# Display JSON report (Default)
+npx tsx scripts/churn-analysis.ts --db indexer.db
+
+# Output as CSV tables
+npx tsx scripts/churn-analysis.ts --format csv --db indexer.db
+
+# Save report directly to a file
+npx tsx scripts/churn-analysis.ts --format csv --db indexer.db --out churn_report.csv
+
+# Customize resubscription logic ("new" or "retention")
+npx tsx scripts/churn-analysis.ts --resubscription-logic retention --format csv
+```
+
+#### CLI Options
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--format [json\|csv]` | Output format for the report | `json` |
+| `--db <path>` | Path override to the SQLite Indexer DB | `indexer.db` |
+| `--out <file>` | Path to save the report output file | stdout |
+| `--resubscription-logic [new\|retention]` | Resubscription handling strategy | `new` |
