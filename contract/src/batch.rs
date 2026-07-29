@@ -3,7 +3,7 @@ use soroban_sdk::{contracttype, Address, Env, Vec};
 use crate::charge_exec;
 use crate::grace;
 use crate::{DataKey, Subscription};
-
+// sync trigger
 pub const MAX_BATCH_SIZE: u32 = 50;
 /// The outcome for a single user in a batch_cancel call.
 #[contracttype]
