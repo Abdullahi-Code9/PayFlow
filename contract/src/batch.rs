@@ -67,7 +67,7 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
                         }
                     }
                 }
-            },
+            }
         };
 
         results.push_back(result);
@@ -96,4 +96,3 @@ pub fn batch_extend_subscription_ttl(env: &Env, users: Vec<Address>) -> Vec<Addr
     }
     extended
 }
-

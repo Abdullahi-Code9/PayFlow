@@ -274,7 +274,11 @@ impl FlowPay {
             global_volume_cap: GLOBAL_MAX_VOLUME_PER_HOUR,
             whitelist_enabled: whitelist::is_whitelist_enabled(&env),
             paused: is_contract_paused(&env),
-            schema_version: env.storage().instance().get(&DataKey::SchemaVersion).unwrap_or(1),
+            schema_version: env
+                .storage()
+                .instance()
+                .get(&DataKey::SchemaVersion)
+                .unwrap_or(1),
         }
     }
 
@@ -1023,8 +1027,6 @@ impl FlowPay {
         min_interval::get_min_interval(&env)
     }
 
-
-
     /// Adds a merchant to the whitelist.
     pub fn add_merchant(env: Env, merchant: Address) {
         bump_instance_ttl(&env);
@@ -1154,7 +1156,7 @@ impl FlowPay {
         admin::require_admin(&env);
         whitelist::unfreeze(&env, &merchant);
     }
-    
+
     /// Returns the reason a merchant was frozen, if any.
     pub fn get_merchant_freeze_reason(env: Env, merchant: Address) -> Option<String> {
         whitelist::get_freeze_reason(&env, &merchant)
@@ -1570,6 +1572,11 @@ impl FlowPay {
         subscription_history::get_charge_history(&env, &user)
     }
 
+    /// Returns the count of stored charge timestamps for a subscriber.
+    pub fn get_charge_history_count(env: Env, user: Address) -> u32 {
+        subscription_history::get_charge_history_count(&env, &user)
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Protocol stats
     // ─────────────────────────────────────────────────────────────
@@ -1595,7 +1602,6 @@ impl FlowPay {
     // Contract pause
     // ─────────────────────────────────────────────────────────────
 
-   
     /// Pauses the contract. Only the admin can call this.
     pub fn pause_contract(env: Env) {
         admin::require_admin(&env);
@@ -1639,13 +1645,18 @@ impl FlowPay {
         };
         #[cfg(not(any(test, feature = "testutils")))]
         let instance_ttl_ledgers = 100_000; // at least 1 day of TTL remaining, used as default since get_ttl is not available on-chain
-        
+
         let active_subscription_count = subscription_count::get_active_count(&env);
         let schema_version = migration::get_schema_version(&env);
 
-        let window: Option<GlobalVolumeWindow> = env.storage().instance().get(&DataKey::GlobalVolumeWindow);
+        let window: Option<GlobalVolumeWindow> =
+            env.storage().instance().get(&DataKey::GlobalVolumeWindow);
         let accumulated_volume = window.map(|w| w.accumulated_volume).unwrap_or(0);
-        let cap = env.storage().instance().get(&DataKey::GlobalVolumeCapOverride).unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR);
+        let cap = env
+            .storage()
+            .instance()
+            .get(&DataKey::GlobalVolumeCapOverride)
+            .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR);
 
         let pct = if cap > 0 {
             ((accumulated_volume * 100) / cap) as u32
@@ -1833,7 +1844,10 @@ impl FlowPay {
     /// `get_subscription` for callers that only need to know which merchant
     /// a user subscribes to.
     pub fn get_subscriber_merchant(env: Env, user: Address) -> Option<Address> {
-        let sub: Subscription = env.storage().persistent().get(&DataKey::Subscription(user))?;
+        let sub: Subscription = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Subscription(user))?;
         Some(sub.merchant)
     }
 
@@ -1938,9 +1952,7 @@ fn pay_per_use_inner(env: &Env, user: Address, amount: i128, recipient: Option<A
         if recipient == env.current_contract_address() {
             env.panic_with_error(ContractError::InvalidRecipient);
         }
-        if whitelist::is_whitelist_enabled(env)
-            && !whitelist::is_whitelisted(env, &recipient)
-        {
+        if whitelist::is_whitelist_enabled(env) && !whitelist::is_whitelisted(env, &recipient) {
             env.panic_with_error(ContractError::MerchantNotWhitelisted);
         }
     }

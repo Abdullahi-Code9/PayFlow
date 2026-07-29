@@ -13,7 +13,6 @@ pub fn get_fee_bps(env: &Env) -> u32 {
     env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
 }
 
-
 /// Proposes a new fee collector and basis points.
 pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
     if bps > 10_000 {
@@ -22,7 +21,7 @@ pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
     if collector == env.current_contract_address() {
         env.panic_with_error(ContractError::InvalidFeeCollector);
     }
-    
+
     let pending = (collector.clone(), bps);
     env.storage()
         .temporary()
@@ -35,7 +34,6 @@ pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
 
 /// Commits a pending fee proposal.
 pub fn commit_fee(env: &Env) {
-    
     let pending: (Address, u32) = env
         .storage()
         .temporary()
