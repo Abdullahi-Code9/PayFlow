@@ -1786,17 +1786,12 @@ fn test_batch_charge_stress() {
 #[test]
 #[should_panic(expected = "Error(Contract, #20)")]
 fn test_batch_charge_over_default_limit_panics() {
-    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
-    let token = TokenClient::new(&env, &token_addr);
-    let sac = StellarAssetClient::new(&env, &token_addr);
 
     let mut users = soroban_sdk::Vec::new(&env);
     for _ in 0..51 {
         let u = Address::generate(&env);
-        sac.mint(&u, &10_000_0000000);
-        token.approve(&u, &contract_id, &10_000_0000000, &200);
-        client.subscribe(&u, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
         users.push_back(u);
     }
 
