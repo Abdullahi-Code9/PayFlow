@@ -4,6 +4,10 @@
  * Queries cancelled events from the indexer SQLite DB, groups by day,
  * and outputs a JSON churn report with cancellation rate.
  *
+ * NOTE: For a more advanced cohort-based monthly retention and merchant churn
+ * analysis dashboard, please use the new script:
+ *   npx ts-node scripts/churn-analysis.ts --format csv
+ *
  * Usage:
  *   node --experimental-sqlite scripts/subscriber-churn-report.ts \
  *     --db <path-to-indexer.db> [--out report.json]
