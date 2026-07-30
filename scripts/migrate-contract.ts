@@ -4,6 +4,7 @@
  */
 
 import { Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
+import { logger } from "./logger";
 
 const RPC_URL = process.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE = process.env.VITE_NETWORK_PASSPHRASE ?? Networks.TESTNET;
@@ -59,45 +60,45 @@ async function migrate(users: string[]): Promise<void> {
   const result = await server.simulateTransaction(tx);
   if ("error" in result) throw new Error(result.error);
 
-  console.log("Migration transaction simulated successfully");
+  logger.info("Migration transaction simulated successfully");
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
 
-  console.log("Starting contract migration...\n");
+  logger.info("Starting contract migration...\n");
 
   // Get pre-migration version
   const preVersion = await getSchemaVersion();
-  console.log(`Pre-migration schema version: ${preVersion}`);
+  logger.info(`Pre-migration schema version: ${preVersion}`);
 
   if (dryRun) {
-    console.log("\n[Dry-run mode] Skipping actual migration");
-    console.log(`Post-migration version would be: ${preVersion}`);
+    logger.info("\n[Dry-run mode] Skipping actual migration");
+    logger.info(`Post-migration version would be: ${preVersion}`);
     return;
   }
 
   // Get users to migrate (empty for now, could be loaded from env or args)
   const users: string[] = [];
 
-  console.log("\nCalling migrate...");
+  logger.info("\nCalling migrate...");
   await migrate(users);
 
   // Get post-migration version
   const postVersion = await getSchemaVersion();
-  console.log(`Post-migration schema version: ${postVersion}`);
+  logger.info(`Post-migration schema version: ${postVersion}`);
 
   // Verify version incremented
   if (postVersion <= preVersion) {
-    console.error(`\nERROR: Schema version did not increment! (${preVersion} -> ${postVersion})`);
+    logger.error(`\nERROR: Schema version did not increment! (${preVersion} -> ${postVersion})`);
     process.exit(1);
   }
 
-  console.log(`\nMigration successful! Version incremented from ${preVersion} to ${postVersion}`);
+  logger.info(`\nMigration successful! Version incremented from ${preVersion} to ${postVersion}`);
 }
 
 main().catch((err) => {
-  console.error("Migration failed:", err.message);
+  logger.error("Migration failed:", err.message);
   process.exit(1);
 });

@@ -14,6 +14,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { writeFileSync } from "node:fs";
+import { logger } from "./logger";
 
 interface EventRow {
   data: string;
@@ -32,11 +33,11 @@ function getArg(flag: string): string | undefined {
 
 function main() {
   const dbPath = getArg("--db");
-  if (!dbPath) { console.error("--db <path> required"); process.exit(1); }
+  if (!dbPath) { logger.error("--db <path> required"); process.exit(1); }
 
   const limitArg = getArg("--limit");
   const limit = limitArg ? parseInt(limitArg, 10) : 20;
-  if (isNaN(limit) || limit < 1) { console.error("--limit must be a positive integer"); process.exit(1); }
+  if (isNaN(limit) || limit < 1) { logger.error("--limit must be a positive integer"); process.exit(1); }
 
   const db = new DatabaseSync(dbPath, { open: true });
   const rows = db
@@ -63,7 +64,7 @@ function main() {
 
   const out = getArg("--out");
   const json = JSON.stringify(leaderboard, null, 2);
-  if (out) { writeFileSync(out, json); console.log(`Wrote leaderboard to ${out}`); }
+  if (out) { writeFileSync(out, json); logger.info(`Wrote leaderboard to ${out}`); }
   else process.stdout.write(json + "\n");
 }
 

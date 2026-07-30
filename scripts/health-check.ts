@@ -22,6 +22,7 @@
 
 import { Contract, Networks, TransactionBuilder, BASE_FEE, Address } from "@stellar/stellar-sdk";
 import { MultiEndpointServer } from "./rpc-client.js";
+import { logger } from "./logger";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -44,9 +45,9 @@ function timestamp(): string {
 function log(status: "healthy" | "unhealthy", detail?: string): void {
   const line = `${timestamp()} contract=${CONTRACT_ID || "NOT_SET"} status=${status}`;
   if (detail) {
-    console.log(`${line} detail=${detail}`);
+    logger.info(`${line} detail=${detail}`);
   } else {
-    console.log(line);
+    logger.info(line);
   }
 }
 

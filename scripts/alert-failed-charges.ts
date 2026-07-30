@@ -18,6 +18,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
+import { logger } from "./logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,15 +63,15 @@ async function sendWebhook(url: string, payload: AlertPayload): Promise<void> {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      console.error(
+      logger.error(
         `Webhook responded with HTTP ${response.status}: ${response.statusText}`
       );
     } else {
-      console.error(`Webhook delivered successfully (HTTP ${response.status})`);
+      logger.error(`Webhook delivered successfully (HTTP ${response.status})`);
     }
   } catch (err) {
     // Log failure but do not crash — callers rely on non-zero exit only for fatal errors
-    console.error(`Webhook delivery failed: ${err}`);
+    logger.error(`Webhook delivery failed: ${err}`);
   }
 }
 
@@ -79,7 +80,7 @@ async function sendWebhook(url: string, payload: AlertPayload): Promise<void> {
 async function main(): Promise<void> {
   const webhookUrl = process.env.WEBHOOK_URL;
   if (!webhookUrl) {
-    console.error("Error: WEBHOOK_URL environment variable is required.");
+    logger.error("Error: WEBHOOK_URL environment variable is required.");
     process.exit(1);
   }
 
@@ -91,7 +92,7 @@ async function main(): Promise<void> {
   try {
     db = new DatabaseSync(dbPath, { open: true });
   } catch (err) {
-    console.error(`Failed to open database at ${dbPath}: ${err}`);
+    logger.error(`Failed to open database at ${dbPath}: ${err}`);
     process.exit(1);
   }
 
@@ -120,16 +121,16 @@ async function main(): Promise<void> {
   };
 
   if (failedCharges.length === 0) {
-    console.error("No failed charges found. No webhook sent.");
-    console.log(JSON.stringify(payload, null, 2));
+    logger.error("No failed charges found. No webhook sent.");
+    logger.info(JSON.stringify(payload, null, 2));
     return;
   }
 
-  console.log(JSON.stringify(payload, null, 2));
+  logger.info(JSON.stringify(payload, null, 2));
   await sendWebhook(webhookUrl, payload);
 }
 
 main().catch((err) => {
-  console.error(`Fatal error: ${err}`);
+  logger.error(`Fatal error: ${err}`);
   process.exit(1);
 });
