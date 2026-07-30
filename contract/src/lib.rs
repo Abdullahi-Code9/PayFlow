@@ -177,6 +177,7 @@ pub struct HealthReport {
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
     pub pending_merchant_rev_count: u32,
+    pub pending_merchant_revenue_count: u32,
 }
 
 #[contracttype]
@@ -430,10 +431,6 @@ impl FlowPay {
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
-        if !sub.active {
-            env.panic_with_error(ContractError::SubscriptionInactive);
-        }
-
         let now = env.ledger().timestamp();
 
         if sub.paused {
@@ -442,6 +439,8 @@ impl FlowPay {
             } else {
                 env.panic_with_error(ContractError::SubscriptionPaused);
             }
+        } else if !sub.active {
+            env.panic_with_error(ContractError::SubscriptionInactive);
         }
 
         let next = charge_exec::compute_next_charge_at(&sub)
@@ -680,6 +679,7 @@ impl FlowPay {
         }
 
         sub.paused = true;
+        sub.active = false;
 
         env.storage().persistent().set(&key, &sub);
         storage::set_pause_expiry(&env, &user, expiry);
@@ -725,6 +725,7 @@ impl FlowPay {
         }
 
         sub.paused = false;
+        sub.active = true;
 
         env.storage().persistent().set(&key, &sub);
         extend_subscription_ttl(&env, &user);
@@ -1120,28 +1121,12 @@ impl FlowPay {
     /// The recipient cannot be the contract address and contract must not be paused.
     pub fn set_merchant_fee_recipient(env: Env, merchant: Address, recipient: Address) {
         ensure_contract_not_paused(&env);
-        merchant.require_auth();
-
-        if recipient == env.current_contract_address() {
-            env.panic_with_error(ContractError::InvalidRecipient);
-        }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::MerchantFeeRecipient(merchant.clone()), &recipient);
-        env.storage().persistent().extend_ttl(
-            &DataKey::MerchantFeeRecipient(merchant.clone()),
-            SUBSCRIPTION_TTL_LEDGERS,
-            SUBSCRIPTION_TTL_LEDGERS,
-        );
+        fee::set_merchant_fee_recipient(&env, &merchant, &recipient);
     }
 
-    /// Returns the configured merchant fee recipient, or the merchant address when unset.
-    pub fn get_merchant_fee_recipient(env: Env, merchant: Address) -> Address {
-        env.storage()
-            .persistent()
-            .get(&DataKey::MerchantFeeRecipient(merchant.clone()))
-            .unwrap_or(merchant)
+    /// Returns the configured merchant fee recipient, or None when unset.
+    pub fn get_merchant_fee_recipient(env: Env, merchant: Address) -> Option<Address> {
+        fee::get_merchant_fee_recipient(&env, &merchant)
     }
 
     /// Freezes a merchant, blocking new subscriptions while leaving existing
@@ -1516,6 +1501,11 @@ impl FlowPay {
     // ─────────────────────────────────────────────────────────────
 
     /// Returns the referrer address for a given subscriber, or `None`.
+    pub fn get_referral(env: Env, user: Address) -> Option<Address> {
+        referral::get_referrer(&env, &user)
+    }
+
+    /// Returns the referrer address for a given subscriber, or `None`.
     pub fn get_referrer(env: Env, user: Address) -> Option<Address> {
         referral::get_referrer(&env, &user)
     }
@@ -1672,6 +1662,11 @@ impl FlowPay {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
                     pending_merchant_rev_count += 1;
+        let mut pending_merchant_revenue_count = 0;
+        for i in 0..total_merchants {
+            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
+                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
+                    pending_merchant_revenue_count += 1;
                 }
             }
         }
@@ -1693,6 +1688,7 @@ impl FlowPay {
             fee_collector_set,
             global_volume_utilization_pct,
             pending_merchant_rev_count,
+            pending_merchant_revenue_count,
         }
     }
 
@@ -1790,6 +1786,18 @@ impl FlowPay {
             .instance()
             .get(&DataKey::GlobalVolumeCapOverride)
             .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR)
+    }
+
+    /// Returns the current global volume window as `(accumulated_volume, window_start_timestamp)`.
+    /// Returns `(0, 0)` if no window has been started yet.
+    /// No auth required.
+    pub fn get_global_volume_window(env: Env) -> (i128, u64) {
+        let window: Option<GlobalVolumeWindow> =
+            env.storage().instance().get(&DataKey::GlobalVolumeWindow);
+        match window {
+            Some(w) => (w.accumulated_volume, w.current_window_start),
+            None => (0, 0),
+        }
     }
 
     /// Admin-only: overrides the global hourly volume cap without requiring
@@ -1936,11 +1944,11 @@ fn pay_per_use_inner(env: &Env, user: Address, amount: i128, recipient: Option<A
         .get(&key)
         .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
-    if !sub.active {
-        env.panic_with_error(ContractError::SubscriptionInactive);
-    }
     if sub.paused {
         env.panic_with_error(ContractError::SubscriptionPaused);
+    }
+    if !sub.active {
+        env.panic_with_error(ContractError::SubscriptionInactive);
     }
 
     // Only the explicit `pay_per_use_to` path re-validates the whitelist;
