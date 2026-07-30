@@ -37,6 +37,7 @@ pub fn get_daily_limit(env: &Env, user: &Address) -> Option<i128> {
 
 The public contract method exposes this to callers. No auth is required — reading your own limit is a view-only operation:
 
+
 ```rust
 /// Returns the current daily spending limit for the caller, or `None` if unset.
 pub fn get_daily_limit(env: Env, user: Address) -> Option<i128> {
