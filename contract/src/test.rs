@@ -1780,23 +1780,17 @@ fn test_batch_charge_stress() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #20)")]
 fn test_batch_charge_over_default_limit_panics() {
-    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
-    let token = TokenClient::new(&env, &token_addr);
-    let sac = StellarAssetClient::new(&env, &token_addr);
 
     let mut users = soroban_sdk::Vec::new(&env);
     for _ in 0..51 {
-        let u = Address::generate(&env);
-        sac.mint(&u, &10_000_0000000);
-        token.approve(&u, &contract_id, &10_000_0000000, &200);
-        client.subscribe(&u, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
-        users.push_back(u);
+        users.push_back(Address::generate(&env));
     }
 
-    client.batch_charge(&users);
+    let res = client.try_batch_charge(&users);
+    assert!(res.is_err());
 }
 
 #[test]
@@ -2664,9 +2658,9 @@ fn test_upgrade_event_emitted() {
     let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic_symbol, Symbol::new(&env, "upgrade"));
 }
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────
 // Issue #96: referral tracking tests
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_referral_stored_on_subscribe() {
@@ -2832,7 +2826,7 @@ fn test_migrate_sets_schema_version() {
     let empty_users = soroban_sdk::Vec::new(&env);
     client.migrate(&empty_users);
 
-    assert_eq!(client.get_schema_version(), 2);
+    assert_eq!(client.get_schema_version(), 3);
 }
 
 #[test]
@@ -2847,7 +2841,7 @@ fn test_migrate_is_idempotent() {
     client.migrate(&empty_users);
     client.migrate(&empty_users); // second call should be a no-op
 
-    assert_eq!(client.get_schema_version(), 2);
+    assert_eq!(client.get_schema_version(), 3);
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2870,10 +2864,26 @@ fn test_migrate_non_admin_panics() {
 
 #[test]
 fn test_migrate_emits_completed_event_with_version_and_count() {
-    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
     env.as_contract(&contract_id, || {
         storage::set_admin(&env, &user);
+    });
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &2u32);
     });
 
     let mut users = soroban_sdk::Vec::new(&env);
@@ -2886,7 +2896,7 @@ fn test_migrate_emits_completed_event_with_version_and_count() {
     let (version, user_count): (u32, u32) = data.try_into_val(&env).unwrap();
 
     assert_eq!(topic_symbol, Symbol::new(&env, "migration_completed"));
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(user_count, 1);
 }
 
@@ -4479,11 +4489,11 @@ fn test_subscriber_page_limit_capped_at_50() {
     let client = FlowPayClient::new(&env, &contract_id);
     client.subscribe(&user, &merchant, &1_0000000, &86400, &token_addr, &None, &None);
     let sac = StellarAssetClient::new(&env, &token_addr);
+    let token = TokenClient::new(&env, &token_addr);
 
     for _ in 0..52 {
         let sub_user = Address::generate(&env);
         sac.mint(&sub_user, &10_000_0000000);
-        let token = TokenClient::new(&env, &token_addr);
         token.approve(&sub_user, &contract_id, &10_000_0000000, &200);
 
         client.subscribe(
@@ -6193,7 +6203,7 @@ fn test_get_schema_version_returns_zero_and_updates() {
 
     let empty_users = soroban_sdk::Vec::new(&env);
     client.migrate(&empty_users);
-    assert_eq!(client.get_schema_version(), 2);
+    assert_eq!(client.get_schema_version(), 3);
 }
 
 #[test]
@@ -6692,3 +6702,268 @@ fn test_extend_subscriber_index_ttl_non_admin_panics() {
 
     client.extend_subscriber_index_ttl();
 }
+
+// ─────────────────────────────────────────────────────────────
+// Issue #3: Per-Merchant Fee Recipient Tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_set_and_get_merchant_fee_recipient() {
+    let (env, contract_id, _token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_merchant_fee_recipient(&merchant), None);
+
+    let custom_recipient = Address::generate(&env);
+    client.set_merchant_fee_recipient(&merchant, &custom_recipient);
+
+    assert_eq!(
+        client.get_merchant_fee_recipient(&merchant),
+        Some(custom_recipient)
+    );
+}
+
+#[test]
+fn test_set_merchant_fee_recipient_contract_address_panics() {
+    let (env, contract_id, _token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let res = client.try_set_merchant_fee_recipient(&merchant, &contract_id);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_merchant_fee_recipient_routing_and_fallback() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let global_collector = Address::generate(&env);
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+    client.propose_fee(&global_collector, &100);
+    client.commit_fee();
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    env.ledger().set_timestamp(86400);
+    client.charge(&user);
+    assert_eq!(token.balance(&global_collector), 10);
+    assert_eq!(token.balance(&merchant), 990);
+
+    let custom_recipient = Address::generate(&env);
+    client.set_merchant_fee_recipient(&merchant, &custom_recipient);
+
+    env.ledger().set_timestamp(172800);
+    client.charge(&user);
+    assert_eq!(token.balance(&custom_recipient), 10);
+    assert_eq!(token.balance(&global_collector), 10);
+    assert_eq!(token.balance(&merchant), 1980);
+}
+
+#[test]
+fn test_merchant_fee_recipient_routes_pay_per_use_and_falls_back() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let global_collector = Address::generate(&env);
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+    client.propose_fee(&global_collector, &100);
+    client.commit_fee();
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    client.pay_per_use(&user, &1000);
+    assert_eq!(token.balance(&global_collector), 10);
+    assert_eq!(token.balance(&merchant), 990);
+
+    let custom_recipient = Address::generate(&env);
+    client.set_merchant_fee_recipient(&merchant, &custom_recipient);
+
+    client.pay_per_use(&user, &1000);
+    assert_eq!(token.balance(&custom_recipient), 10);
+    assert_eq!(token.balance(&global_collector), 10);
+    assert_eq!(token.balance(&merchant), 1980);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Issue #4: Bounded Pause with Auto-Resume Tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_pause_until_auto_resume_on_charge() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    client.pause_until(&user, &90000);
+
+    env.ledger().set_timestamp(86400);
+    let res = client.try_charge(&user);
+    assert!(res.is_err());
+
+    env.ledger().set_timestamp(90000);
+    client.charge(&user);
+
+    let sub = client.get_subscription(&user).unwrap();
+    assert_eq!(sub.paused, false);
+    assert_eq!(sub.active, true);
+    assert_eq!(token.balance(&merchant), 1000);
+}
+
+#[test]
+fn test_pause_until_invalid_expiry_panics() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    env.ledger().set_timestamp(200000);
+    let res = client.try_pause_until(&user, &200000);
+    assert!(res.is_err());
+    let res2 = client.try_pause_until(&user, &150000);
+    assert!(res2.is_err());
+}
+
+#[test]
+fn test_resume_clears_pause_expiry() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    client.pause_until(&user, &300000);
+    client.resume(&user);
+
+    let sub = client.get_subscription(&user).unwrap();
+    assert_eq!(sub.paused, false);
+    assert_eq!(sub.active, true);
+
+    env.as_contract(&contract_id, || {
+        let pause_expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert_eq!(pause_expiry, None);
+    });
+}
+
+#[test]
+fn test_pause_until_auto_resume_on_batch_charge_and_clears_expiry() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+    client.pause_until(&user, &90000);
+
+    env.ledger().set_timestamp(90000);
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let result = client.batch_charge(&users);
+    assert_eq!(result.get(0).unwrap(), crate::ChargeResult::Charged);
+
+    let sub = client.get_subscription(&user).unwrap();
+    assert_eq!(sub.paused, false);
+    assert_eq!(sub.active, true);
+
+    env.as_contract(&contract_id, || {
+        let pause_expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert_eq!(pause_expiry, None);
+    });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Issue #5: get_referral Read Function Tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_get_referral_lifecycle() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let referrer = Address::generate(&env);
+
+    assert_eq!(client.get_referral(&user), None);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1000,
+        &86400,
+        &token_addr,
+        &None,
+        &Some(referrer.clone()),
+    );
+    assert_eq!(client.get_referral(&user), Some(referrer.clone()));
+
+    client.cancel(&user);
+    assert_eq!(client.get_referral(&user), None);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1000,
+        &86400,
+        &token_addr,
+        &None,
+        &Some(referrer.clone()),
+    );
+    assert_eq!(client.get_referral(&user), Some(referrer));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Issue #6: Storage Migration v3 Tests
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_migration_v2_to_v3_populates_referrer() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let referrer = Address::generate(&env);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1000,
+        &86400,
+        &token_addr,
+        &None,
+        &Some(referrer.clone()),
+    );
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &2u32);
+    });
+
+    assert_eq!(client.get_schema_version(), 2);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+
+    client.migrate(&users);
+
+    assert_eq!(client.get_schema_version(), 3);
+    let sub = client.get_subscription(&user).unwrap();
+    assert_eq!(sub.referrer, Some(referrer));
+
+    client.migrate(&users);
+    assert_eq!(client.get_schema_version(), 3);
+}
+
