@@ -333,3 +333,11 @@ pub fn publish_subscriber_index_ttl_extended(env: &Env, count: u64) {
     env.events()
         .publish((Symbol::new(env, "subscriber_index_ttl_extended"),), count);
 }
+
+pub fn publish_merchant_fee_recipient_set(env: &Env, merchant: &Address, recipient: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "merchant_fee_recipient_set"), merchant.clone()),
+        recipient.clone(),
+    );
+}
+
