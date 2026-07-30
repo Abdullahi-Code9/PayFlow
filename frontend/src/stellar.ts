@@ -1141,6 +1141,7 @@ export async function buildWhitelistBatchRemoveTx(
       { type: "vec" }
     ),
   ]);
+}
 // ── TTL / Archived-state helpers ──────────────────────────────────────────────
 
 /**

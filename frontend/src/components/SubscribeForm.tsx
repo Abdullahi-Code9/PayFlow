@@ -291,6 +291,7 @@ export default function SubscribeForm({
         )}
       </div>
 
+      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit" aria-busy={pending || validating}>
       <button
         type="submit"
         disabled={disabled}

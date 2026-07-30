@@ -68,7 +68,6 @@ describe("SubscriptionCard", () => {
   const mockOnRefresh = vi.fn();
   const mockUserKey = "GUSER123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234";
   const mockOnCancel = vi.fn();
-  const mockUserKey = "GUSER123456789";
 
   const createMockSubscription = (overrides?: Partial<Subscription>): Subscription => ({
     merchant: "GMERCHANT123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345678",
