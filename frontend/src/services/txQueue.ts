@@ -9,7 +9,6 @@
 import { useState, useEffect } from "react";
 
 export type TxEntryStatus = "pending" | "submitted" | "confirmed" | "failed";
-
 export interface TxEntry {
   /** Unique entry id (monotonically increasing) */
   id: number;
@@ -143,6 +142,10 @@ const queueStateListeners = new Set<QueueStateListener>();
 
 function notifyQueueState() {
   for (const listener of queueStateListeners) {
+    listener();
+  }
+}
+
 type QueueListener = () => void;
 const queueListeners = new Set<QueueListener>();
 
@@ -196,8 +199,6 @@ export function enqueueTransaction<T>(
 // React hook for consuming queue depth / pending label in UI components
 // ---------------------------------------------------------------------------
 
-import { useState, useEffect } from "react";
-
 export function useTxQueue() {
   const [state, setState] = useState({ pendingLabel, queueDepth });
 
@@ -206,9 +207,6 @@ export function useTxQueue() {
     queueStateListeners.add(listener);
     return () => {
       queueStateListeners.delete(listener);
-    queueListeners.add(listener);
-    return () => {
-      queueListeners.delete(listener);
     };
   }, []);
 

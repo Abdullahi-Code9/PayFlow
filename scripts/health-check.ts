@@ -55,7 +55,7 @@ function log(status: "healthy" | "unhealthy", detail?: string): void {
  */
 async function simulateCall(server: Server, fnName: string): Promise<unknown> {
   const contract = new Contract(CONTRACT_ID);
-  const account = await server.getAccount(SIMULATION_SOURCE).catch(() => {
+  const account = await server.getAccount(SIMULATION_SOURCE).catch(async () => {
     // For simulation-only calls, build a synthetic account if lookup fails.
     return new (await import("@stellar/stellar-sdk")).Account(SIMULATION_SOURCE, "0");
   });
