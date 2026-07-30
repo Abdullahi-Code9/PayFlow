@@ -25,18 +25,23 @@ pub fn add_merchant(env: &Env, merchant: &Address) {
     }
     let key = DataKey::MerchantWhitelist(merchant.clone());
     env.storage().persistent().set(&key, &true);
-    env.storage().persistent().extend_ttl(&key, 1555200, 1555200);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, 1555200, 1555200);
 
     let size = get_whitelist_size(env);
     let index_key = DataKey::WhitelistIndex(size);
     env.storage().persistent().set(&index_key, merchant);
-    env.storage().persistent().extend_ttl(&index_key, 1555200, 1555200);
+    env.storage()
+        .persistent()
+        .extend_ttl(&index_key, 1555200, 1555200);
 
     let size_key = DataKey::WhitelistIndexSize;
     env.storage().persistent().set(&size_key, &(size + 1));
-    env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
+    env.storage()
+        .persistent()
+        .extend_ttl(&size_key, 1555200, 1555200);
 
-        .set(&DataKey::MerchantWhitelist(merchant.clone()), &true);
     merchant_stats::index_merchant(env, merchant);
     events::publish_merchant_added(env, merchant);
 }
@@ -59,15 +64,23 @@ pub fn remove_merchant(env: &Env, merchant: &Address) {
                     let last_idx = size - 1;
                     if i != last_idx {
                         let last_key = DataKey::WhitelistIndex(last_idx);
-                        if let Some(last_addr) = env.storage().persistent().get::<_, Address>(&last_key) {
+                        if let Some(last_addr) =
+                            env.storage().persistent().get::<_, Address>(&last_key)
+                        {
                             env.storage().persistent().set(&key, &last_addr);
-                            env.storage().persistent().extend_ttl(&key, 1555200, 1555200);
+                            env.storage()
+                                .persistent()
+                                .extend_ttl(&key, 1555200, 1555200);
                         }
                     }
-                    env.storage().persistent().remove(&DataKey::WhitelistIndex(last_idx));
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKey::WhitelistIndex(last_idx));
                     let size_key = DataKey::WhitelistIndexSize;
                     env.storage().persistent().set(&size_key, &(size - 1));
-                    env.storage().persistent().extend_ttl(&size_key, 1555200, 1555200);
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&size_key, 1555200, 1555200);
                     break;
                 }
             }
@@ -94,8 +107,6 @@ pub fn get_whitelist_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     out
 }
 
-
-/// Checks if the merchant whitelist is currently enabled.
 /// Checks if the merchant whitelist is currently enabled. Defaults to true.
 pub fn is_whitelist_enabled(env: &Env) -> bool {
     env.storage()
@@ -124,7 +135,16 @@ pub fn is_frozen(env: &Env, merchant: &Address) -> bool {
 }
 
 /// Freezes a merchant, blocking new subscriptions. Idempotent.
-pub fn freeze(env: &Env, merchant: &Address) {
+pub fn freeze(env: &Env, merchant: &Address, reason: Option<soroban_sdk::String>) {
+    if let Some(r) = &reason {
+        if r.len() > 128 {
+            env.panic_with_error(crate::errors::ContractError::MetadataLabelTooLong);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::MerchantFreezeReason(merchant.clone()), r);
+    }
+
     env.storage()
         .persistent()
         .set(&DataKey::MerchantFrozen(merchant.clone()), &true);
@@ -137,5 +157,14 @@ pub fn unfreeze(env: &Env, merchant: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::MerchantFrozen(merchant.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::MerchantFreezeReason(merchant.clone()));
     events::publish_merchant_unfrozen(env, merchant);
+}
+
+pub fn get_freeze_reason(env: &Env, merchant: &Address) -> Option<soroban_sdk::String> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MerchantFreezeReason(merchant.clone()))
 }

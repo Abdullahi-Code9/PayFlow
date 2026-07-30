@@ -8,7 +8,7 @@
  *  - Modal opens and closes correctly
  */
 import React from "react";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
@@ -23,11 +23,16 @@ vi.mock("../stellar", () => ({
 
 // We need to mock @stellar/stellar-sdk/rpc Server so RpcHealthProvider doesn't
 // make real network calls during tests.
-vi.mock("@stellar/stellar-sdk/rpc", () => ({
-  Server: vi.fn().mockImplementation(() => ({
-    getHealth: vi.fn().mockResolvedValue({}),
-  })),
-}));
+// Using a class mock ensures `new Server(url)` works correctly.
+const mockGetHealth = vi.fn().mockResolvedValue({});
+vi.mock("@stellar/stellar-sdk/rpc", () => {
+  class MockServer {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    constructor(_url: string) {}
+    getHealth = mockGetHealth;
+  }
+  return { Server: MockServer };
+});
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
 import { validateRpcUrl, normalizeRpcUrl, RpcHealthProvider } from "../context/RpcHealthContext";

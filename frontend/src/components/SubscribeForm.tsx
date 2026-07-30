@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StrKey } from "@stellar/stellar-sdk";
-import React, { useMemo, useState, useEffect } from "react";
 import { buildSubscribeTx, DEFAULT_TOKEN } from "../stellar";
 import { friendlyError } from "../utils/errors";
 import { STROOPS_PER_XLM, BILLING_INTERVALS } from "../constants"; // BILLING_INTERVALS used for initial value
@@ -21,6 +20,7 @@ interface Props {
   onSuccess: () => void;
   announce: (message: string) => void;
   onSubscribed?: () => void;
+  isPaused?: boolean;
 }
 
 export default function SubscribeForm({
@@ -29,15 +29,27 @@ export default function SubscribeForm({
   onSuccess,
   announce,
   onSubscribed,
+  isPaused = false,
 }: Props) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [interval, setInterval] = useState(BILLING_INTERVALS[2].value);
   const [referrer, setReferrer] = useState("");
   const [referrerError, setReferrerError] = useState<string | null>(null);
-  const { errors, validate } = useFormValidation();
+  const [showAddressBook, setShowAddressBook] = useState(false);
+
+  // Track which fields have been blurred (touched) for inline validation
+  const [touched, setTouched] = useState<{ merchant: boolean; amount: boolean; interval: boolean }>({
+    merchant: false,
+    amount: false,
+    interval: false,
+  });
+
+  const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
   const { toasts, addToast, removeToast } = useToast();
   const tx = useTransaction();
+
+  const debouncedMerchant = useDebounce(merchant, 500);
 
   // Pre-fill referrer from ?ref= URL query param (Issue #661)
   useEffect(() => {
@@ -56,19 +68,7 @@ export default function SubscribeForm({
     }
   }, [userKey]);
 
-  function validateReferrer(value: string): string | null {
-    if (!value) return null; // optional field
-    if (value === userKey) return "Self-referral is not allowed.";
-    if (!StrKey.isValidEd25519PublicKey(value)) {
-      return "Invalid Stellar address format";
-  const [showAddressBook, setShowAddressBook] = useState(false);
-  const { errors, validate, validateAsync, validating, isValid } = useFormValidation();
-  const { toasts, addToast, removeToast } = useToast();
-  const tx = useTransaction();
-
-  const debouncedMerchant = useDebounce(merchant, 500);
-
-  // Validate whenever any field changes
+  // Validate whenever any field changes (drives isValid for submit button)
   useEffect(() => {
     validate({ merchant, amount, interval });
   }, [merchant, amount, interval, validate]);
@@ -83,6 +83,19 @@ export default function SubscribeForm({
     }
   }, [debouncedMerchant, validateAsync]);
 
+  function handleBlur(field: "merchant" | "amount" | "interval") {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  }
+
+  function validateReferrer(value: string): string | null {
+    if (!value) return null; // optional field
+    if (value === userKey) return "Self-referral is not allowed.";
+    if (!StrKey.isValidEd25519PublicKey(value)) {
+      return "Invalid Stellar address format";
+    }
+    return null;
+  }
+
   function handleReferrerChange(value: string) {
     setReferrer(value);
     setReferrerError(validateReferrer(value));
@@ -90,6 +103,9 @@ export default function SubscribeForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Mark all fields as touched on submit attempt
+    setTouched({ merchant: true, amount: true, interval: true });
+
     const isValidAsync = await validateAsync({ merchant, amount, interval });
     if (!isValidAsync) return;
 
@@ -110,7 +126,6 @@ export default function SubscribeForm({
         BigInt(interval),
         DEFAULT_TOKEN,
         refAddr,
-        null,
         ""
       );
       return onSign(xdr);
@@ -135,7 +150,14 @@ export default function SubscribeForm({
   }, [amount]);
 
   const pending = tx.status === "pending";
-  const disabled = pending || validating || !isValid;
+  const disabled = pending || validating || !isValid || isPaused;
+
+  // Only show errors for touched fields (blur-based inline validation)
+  const visibleErrors = {
+    merchant: touched.merchant ? errors.merchant : undefined,
+    amount: touched.amount ? errors.amount : undefined,
+    interval: touched.interval ? errors.interval : undefined,
+  };
 
   return (
     <form onSubmit={handleSubmit} className="subscribe-form">
@@ -147,9 +169,22 @@ export default function SubscribeForm({
           placeholder="G…"
           value={merchant}
           onChange={(e) => setMerchant(e.target.value)}
+          onBlur={() => handleBlur("merchant")}
           required
+          aria-invalid={touched.merchant ? !!errors.merchant : undefined}
+          aria-describedby={visibleErrors.merchant ? "merchant-error" : undefined}
+          data-testid="merchant-input"
         />
-        {errors.merchant && <span className="text-error">{errors.merchant}</span>}
+        {visibleErrors.merchant && (
+          <span
+            id="merchant-error"
+            className="text-error"
+            role="alert"
+            data-testid="merchant-error"
+          >
+            {visibleErrors.merchant}
+          </span>
+        )}
         <button
           type="button"
           className="btn-secondary subscribe-form__address-book-btn"
@@ -180,9 +215,22 @@ export default function SubscribeForm({
           placeholder="5"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onBlur={() => handleBlur("amount")}
           required
+          aria-invalid={touched.amount ? !!errors.amount : undefined}
+          aria-describedby={visibleErrors.amount ? "amount-error" : undefined}
+          data-testid="amount-input"
         />
-        {errors.amount && <span className="text-error">{errors.amount}</span>}
+        {visibleErrors.amount && (
+          <span
+            id="amount-error"
+            className="text-error"
+            role="alert"
+            data-testid="amount-error"
+          >
+            {visibleErrors.amount}
+          </span>
+        )}
         {userKey && (
           <AllowanceDisplay
             userKey={userKey}
@@ -193,8 +241,23 @@ export default function SubscribeForm({
       </label>
 
       {/* #278 — Use dedicated IntervalSelector instead of inline <select> */}
-      <IntervalSelector value={interval} onChange={setInterval} />
-      {errors.interval && <span className="text-error">{errors.interval}</span>}
+      <div
+        onBlur={() => handleBlur("interval")}
+        data-testid="interval-wrapper"
+      >
+        <IntervalSelector value={interval} onChange={setInterval} />
+      </div>
+      {visibleErrors.interval && (
+        <span
+          id="interval-error"
+          className="text-error"
+          role="alert"
+          data-testid="interval-error"
+          aria-live="polite"
+        >
+          {visibleErrors.interval}
+        </span>
+      )}
 
       {/* Referrer field — pre-filled from ?ref= URL param (Issue #661) */}
       <label className="form-group">
@@ -213,6 +276,9 @@ export default function SubscribeForm({
           aria-invalid={!!referrerError}
           data-testid="referrer-input"
         />
+      </label>
+
+      <div className="form-group">
         {referrerError && (
           <span
             id="referrer-error"
@@ -223,11 +289,16 @@ export default function SubscribeForm({
             {referrerError}
           </span>
         )}
-      </label>
+      </div>
 
-      <button type="submit" disabled={pending} className="btn-primary subscribe-form__submit">
-        {pending ? "Confirming…" : "Subscribe"}
-      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit">
+      <button type="submit" disabled={disabled} className="btn-primary subscribe-form__submit" aria-busy={pending || validating}>
+      <button
+        type="submit"
+        disabled={disabled}
+        className="btn-primary subscribe-form__submit"
+        aria-busy={pending || validating}
+        aria-label={isPaused ? "Subscribe (unavailable during maintenance)" : undefined}
+      >
         {pending ? "Confirming…" : validating ? "Validating…" : "Subscribe"}
       </button>
 
