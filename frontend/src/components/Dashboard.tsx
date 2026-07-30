@@ -31,6 +31,7 @@ interface Props {
   announce: (message: string) => void;
   onCancelled?: () => void;
   onPayPerUse?: (amount: bigint) => void;
+  isPaused?: boolean;
 }
 
 export default function Dashboard({
@@ -40,6 +41,7 @@ export default function Dashboard({
   announce,
   onCancelled,
   onPayPerUse,
+  isPaused = false,
 }: Props) {
   const { subscription: sub, loading, refresh } = useSubscriptionSync(userKey, refreshTrigger);
   const { toasts, addToast, removeToast } = useToast();
@@ -162,7 +164,7 @@ export default function Dashboard({
                   <SubscriptionHistory userKey={userKey} />
                 </Suspense>
               </ErrorBoundary>
-              <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} />
+              <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} isPaused={isPaused} />
               {ppuPending && (
                 <p className="status-text status-text--pending">Confirming payment…</p>
               )}
