@@ -171,6 +171,22 @@ pub fn publish_subscription_transferred(env: &Env, old_user: &Address, new_user:
     );
 }
 
+pub fn emit_subscription_transferred(env: &Env, from: &Address, to: &Address, sub: &Subscription) {
+    env.events().publish(
+        (
+            Symbol::new(env, "subscription_transferred"),
+            from.clone(),
+            to.clone(),
+        ),
+        (
+            sub.merchant.clone(),
+            sub.amount,
+            sub.interval,
+            sub.token.clone(),
+        ),
+    );
+}
+
 pub fn publish_upgraded(env: &Env, _new_wasm_hash: &BytesN<32>) {
     env.events().publish((Symbol::new(env, "upgrade"),), ());
 }
@@ -201,8 +217,7 @@ pub fn publish_daily_limit_removed(env: &Env, user: &Address) {
 }
 
 pub fn publish_fee_cleared(env: &Env) {
-    env.events()
-        .publish((Symbol::new(env, "fee_cleared"),), ());
+    env.events().publish((Symbol::new(env, "fee_cleared"),), ());
 }
 
 pub fn publish_daily_window_started(env: &Env, user: &Address) {
@@ -301,8 +316,10 @@ pub fn publish_grace_period_committed(env: &Env, seconds: u64) {
 }
 
 pub fn publish_subscription_auto_resumed(env: &Env, user: &Address) {
-    env.events()
-        .publish((Symbol::new(env, "subscription_auto_resumed"), user.clone()), ());
+    env.events().publish(
+        (Symbol::new(env, "subscription_auto_resumed"), user.clone()),
+        (),
+    );
 }
 
 pub fn publish_migration_completed(env: &Env, version: u32, user_count: u32) {
@@ -313,8 +330,14 @@ pub fn publish_migration_completed(env: &Env, version: u32, user_count: u32) {
 }
 
 pub fn publish_subscriber_index_ttl_extended(env: &Env, count: u64) {
+    env.events()
+        .publish((Symbol::new(env, "subscriber_index_ttl_extended"),), count);
+}
+
+pub fn publish_merchant_fee_recipient_set(env: &Env, merchant: &Address, recipient: &Address) {
     env.events().publish(
-        (Symbol::new(env, "subscriber_index_ttl_extended"),),
-        count,
+        (Symbol::new(env, "merchant_fee_recipient_set"), merchant.clone()),
+        recipient.clone(),
     );
 }
+

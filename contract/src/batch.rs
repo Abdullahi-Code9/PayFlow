@@ -54,20 +54,17 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
         let result = match sub_opt {
             None => ChargeResult::NoSubscription,
             Some(mut sub) => {
-                // Try auto-resume if paused past expiry
-                if sub.paused && charge_exec::try_auto_resume(env, &user, &mut sub, now) {
-                    charge_exec::execute_charge(env, &user, &key, &mut sub, now);
-                    ChargeResult::Charged
-                } else {
-                    match charge_exec::precheck_charge(&sub, now, grace_period) {
-                        Err(skip) => skip,
-                        Ok(()) => {
-                            charge_exec::execute_charge(env, &user, &key, &mut sub, now);
-                            ChargeResult::Charged
-                        }
+                if sub.paused {
+                    charge_exec::try_auto_resume(env, &user, &mut sub, now);
+                }
+                match charge_exec::precheck_charge(&sub, now, grace_period) {
+                    Err(skip) => skip,
+                    Ok(()) => {
+                        charge_exec::execute_charge(env, &user, &key, &mut sub, now);
+                        ChargeResult::Charged
                     }
                 }
-            },
+            }
         };
 
         results.push_back(result);
@@ -96,4 +93,3 @@ pub fn batch_extend_subscription_ttl(env: &Env, users: Vec<Address>) -> Vec<Addr
     }
     extended
 }
-
