@@ -6703,6 +6703,40 @@ fn test_extend_subscriber_index_ttl_non_admin_panics() {
     client.extend_subscriber_index_ttl();
 }
 
+// ─────────────────────────────────────────────
+// Issue #9: validate_recipient_address tests
+// ─────────────────────────────────────────────
+
+/// set_fee() with a valid (non-contract) collector address must succeed.
+#[test]
+fn test_validate_recipient_address_valid_passes() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    let collector = Address::generate(&env);
+    // Must not panic — a regular address is a valid fee collector.
+    client.set_fee(&collector, &100u32);
+
+    assert_eq!(client.get_fee(), Some((collector, 100u32)));
+}
+
+/// set_fee() with the contract's own address as collector must panic with
+/// ContractError::InvalidFeeCollector (error code 26).
+#[test]
+#[should_panic(expected = "Error(Contract, #26)")]
+fn test_validate_recipient_address_contract_self_panics() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    // Passing the contract address as fee collector must be rejected.
+    client.set_fee(&contract_id, &100u32);
+}
 // ─────────────────────────────────────────────────────────────
 // Issue #3: Per-Merchant Fee Recipient Tests
 // ─────────────────────────────────────────────────────────────
