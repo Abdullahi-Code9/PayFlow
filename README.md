@@ -157,6 +157,7 @@ test test::test_daily_limit_visibility_and_spend_tracking ... ok
 
 A keeper is an off-chain scheduler (cron job, AWS Lambda, or any scripted process) that calls `batch_charge(users)` on the FlowPay contract whenever subscribers' billing intervals have elapsed. Because Soroban has no native scheduler, recurring charges depend entirely on this external trigger. To run one locally, maintain a list of subscriber addresses sourced from contract events and invoke `batch_charge` on a schedule — the contract handles all eligibility checks, so ineligible users are silently skipped without aborting the transaction. See [Architecture — Keeper Service](docs/ARCHITECTURE.md#keeper-service) for the recommended pattern.
 
+
 ### How do I spin up a local validation environment for testing?
 
 All contract tests run fully in-memory with no network connection required — `soroban-sdk`'s `Env::default()` provides an isolated Soroban runtime. Install Rust 1.70+ with the `wasm32-unknown-unknown` target, then run `cd contract && cargo test` to execute the full suite. To simulate time passing (e.g. advancing past a billing interval), use `env.ledger().with_mut(|l| { l.timestamp += seconds; })` inside your test. For frontend validation, run `cd frontend && npm run test` using Vitest. Full setup steps are in [Testing Guide](docs/TESTING.md).
