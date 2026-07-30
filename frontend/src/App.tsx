@@ -180,6 +180,21 @@ export default function App() {
   // Global keyboard shortcuts
   useRegisterShortcuts([
     {
+      key: "1",
+      description: "Switch to Subscriber tab",
+      action: () => setTab("dashboard"),
+    },
+    {
+      key: "2",
+      description: "Switch to Merchant tab",
+      action: () => setTab("merchant"),
+    },
+    {
+      key: "3",
+      description: "Switch to Admin tab",
+      action: () => setTab("admin"),
+    },
+    {
       key: "d",
       description: "Switch to Dashboard",
       action: () => setTab("dashboard"),
@@ -198,6 +213,18 @@ export default function App() {
       key: "a",
       description: "Switch to Admin",
       action: () => setTab("admin"),
+    },
+    {
+      key: "n",
+      description: "New Subscription form",
+      action: () => {
+        if (!showHelp) setTab("subscribe");
+      },
+    },
+    {
+      key: "r",
+      description: "Refresh current tab",
+      action: () => setRefresh((r) => r + 1),
     },
     {
       key: "?",
