@@ -3,6 +3,7 @@
 
 mod admin;
 mod batch;
+#[cfg(feature = "bench")]
 mod bench;
 mod charge_exec;
 mod errors;

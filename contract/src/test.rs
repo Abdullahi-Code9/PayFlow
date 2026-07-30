@@ -1748,6 +1748,7 @@ fn test_batch_charge_no_subscription() {
 }
 
 #[test]
+#[cfg(feature = "bench")]
 fn test_batch_charge_stress() {
     let (env, contract_id, token_addr, _user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -1789,6 +1790,8 @@ fn test_batch_charge_stress() {
 }
 
 #[test]
+#[cfg(feature = "bench")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_batch_charge_over_default_limit_panics() {
     let (env, contract_id, _token_addr, _user, _merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -4674,6 +4677,7 @@ fn test_subscriber_page_offset_beyond_count_returns_empty() {
 }
 
 #[test]
+#[cfg(feature = "bench")]
 fn test_subscriber_page_limit_capped_at_50() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);

@@ -1115,6 +1115,7 @@
                 },
                 {
                   "key": {
+                    "symbol": "pending_merchant_rev_count"
                     "symbol": "pending_merchant_revenue_count"
                   },
                   "val": {
