@@ -175,6 +175,7 @@ pub struct HealthReport {
     pub schema_version: u32,
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
+    pub pending_merchant_rev_count: u32,
     pub pending_merchant_revenue_count: u32,
 }
 
@@ -1650,6 +1651,11 @@ impl FlowPay {
         let global_volume_utilization_pct = if pct > 100 { 100 } else { pct };
 
         let total_merchants = merchant_stats::get_merchant_index_size(&env);
+        let mut pending_merchant_rev_count = 0;
+        for i in 0..total_merchants {
+            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
+                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
+                    pending_merchant_rev_count += 1;
         let mut pending_merchant_revenue_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
@@ -1675,6 +1681,7 @@ impl FlowPay {
             schema_version,
             fee_collector_set,
             global_volume_utilization_pct,
+            pending_merchant_rev_count,
             pending_merchant_revenue_count,
         }
     }
@@ -1772,6 +1779,18 @@ impl FlowPay {
             .instance()
             .get(&DataKey::GlobalVolumeCapOverride)
             .unwrap_or(GLOBAL_MAX_VOLUME_PER_HOUR)
+    }
+
+    /// Returns the current global volume window as `(accumulated_volume, window_start_timestamp)`.
+    /// Returns `(0, 0)` if no window has been started yet.
+    /// No auth required.
+    pub fn get_global_volume_window(env: Env) -> (i128, u64) {
+        let window: Option<GlobalVolumeWindow> =
+            env.storage().instance().get(&DataKey::GlobalVolumeWindow);
+        match window {
+            Some(w) => (w.accumulated_volume, w.current_window_start),
+            None => (0, 0),
+        }
     }
 
     /// Admin-only: overrides the global hourly volume cap without requiring

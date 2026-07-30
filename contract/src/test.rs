@@ -3831,6 +3831,90 @@ fn test_global_volume_window_reset() {
     client.charge(&user_b);
 }
 
+// ─────────────────────────────────────────────
+// Issue #10: get_global_volume_window tests
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_get_global_volume_window_returns_zero_on_fresh_contract() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let (volume, window_start) = client.get_global_volume_window();
+    assert_eq!(volume, 0, "accumulated volume should be 0 on fresh contract");
+    assert_eq!(window_start, 0, "window start should be 0 on fresh contract");
+}
+
+#[test]
+fn test_get_global_volume_window_correct_values_after_charge() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let amount: i128 = 1_000_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    let charge_time = env.ledger().timestamp();
+    client.charge(&user);
+
+    let (volume, window_start) = client.get_global_volume_window();
+    assert_eq!(volume, amount, "accumulated volume should equal the charged amount");
+    assert_eq!(window_start, charge_time, "window_start should equal ledger timestamp at charge time");
+}
+
+#[test]
+fn test_get_global_volume_window_resets_after_hour() {
+    let (env, contract_id, token_addr, _user_setup, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let user_a = setup_large_balance(&env, &contract_id, &token_addr);
+    let user_b = setup_large_balance(&env, &contract_id, &token_addr);
+
+    let amount: i128 = 1_000_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user_a, &merchant, &amount, &interval, &token_addr, &None, &None);
+    client.subscribe(&user_b, &merchant, &amount, &interval, &token_addr, &None, &None);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    client.charge(&user_a);
+
+    // Confirm volume accumulated in the first window
+    let (volume_before, _) = client.get_global_volume_window();
+    assert_eq!(volume_before, amount);
+
+    // Advance past the 1-hour window boundary
+    env.ledger().with_mut(|l| {
+        l.timestamp += 3601;
+    });
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval;
+    });
+    let second_charge_time = env.ledger().timestamp();
+    client.charge(&user_b);
+
+    // Window should have reset: only the second charge amount is accumulated
+    let (volume_after, window_start_after) = client.get_global_volume_window();
+    assert_eq!(volume_after, amount, "volume should reset to just the new charge amount after window expiry");
+    assert_eq!(window_start_after, second_charge_time, "window_start should be the new charge time after reset");
+}
+
+
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // subscribe_with_metadata tests
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
