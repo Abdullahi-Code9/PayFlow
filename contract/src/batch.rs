@@ -3,8 +3,19 @@ use soroban_sdk::{contracttype, Address, Env, Vec};
 use crate::charge_exec;
 use crate::grace;
 use crate::{DataKey, Subscription};
-
+// sync trigger
 pub const MAX_BATCH_SIZE: u32 = 50;
+/// The outcome for a single user in a batch_cancel call.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum CancelResult {
+    /// Subscription was cancelled successfully.
+    Cancelled,
+    /// No subscription found for this address.
+    NoSubscription,
+    /// Subscription was already cancelled.
+    AlreadyCancelled,
+}
 
 /// The outcome for a single user in a batch_charge call.
 #[contracttype]
@@ -54,20 +65,17 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
         let result = match sub_opt {
             None => ChargeResult::NoSubscription,
             Some(mut sub) => {
-                // Try auto-resume if paused past expiry
-                if sub.paused && charge_exec::try_auto_resume(env, &user, &mut sub, now) {
-                    charge_exec::execute_charge(env, &user, &key, &mut sub, now);
-                    ChargeResult::Charged
-                } else {
-                    match charge_exec::precheck_charge(&sub, now, grace_period) {
-                        Err(skip) => skip,
-                        Ok(()) => {
-                            charge_exec::execute_charge(env, &user, &key, &mut sub, now);
-                            ChargeResult::Charged
-                        }
+                if sub.paused {
+                    charge_exec::try_auto_resume(env, &user, &mut sub, now);
+                }
+                match charge_exec::precheck_charge(&sub, now, grace_period) {
+                    Err(skip) => skip,
+                    Ok(()) => {
+                        charge_exec::execute_charge(env, &user, &key, &mut sub, now);
+                        ChargeResult::Charged
                     }
                 }
-            },
+            }
         };
 
         results.push_back(result);
@@ -95,5 +103,35 @@ pub fn batch_extend_subscription_ttl(env: &Env, users: Vec<Address>) -> Vec<Addr
         }
     }
     extended
+}
+
+pub fn batch_cancel(env: &Env, users: Vec<Address>) -> Vec<CancelResult> {
+    if users.len() > crate::MAX_BATCH_PAUSE_SUBSCRIPTIONS {
+        env.panic_with_error(crate::errors::ContractError::BatchTooLarge);
+    }
+
+    let mut results: Vec<CancelResult> = Vec::new(env);
+
+    for user in users.iter() {
+        let key = DataKey::Subscription(user.clone());
+        let sub_opt: Option<Subscription> = env.storage().persistent().get(&key);
+
+        let result = match sub_opt {
+            None => CancelResult::NoSubscription,
+            Some(sub) => {
+                if !sub.active {
+                    CancelResult::AlreadyCancelled
+                } else {
+                    crate::cancel_inner(env, &user);
+                    crate::events::publish_cancelled(env, &user);
+                    CancelResult::Cancelled
+                }
+            }
+        };
+
+        results.push_back(result);
+    }
+
+    results
 }
 

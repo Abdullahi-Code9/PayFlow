@@ -8,6 +8,7 @@
 
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { EventDedupCache, createCacheKey } from "./event-dedup.js";
+import { MultiEndpointServer } from "./rpc-client.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────────
 
@@ -207,6 +208,8 @@ function debugLog(...args: unknown[]): void {
 
 const server = new Server(RPC_URL);
 const dedupCache = new EventDedupCache();
+const server = new MultiEndpointServer(RPC_URL);
+const seenEvents = new Set<string>();
 let currentLedger = 0;
 let totalEventsSeen = 0;
 
