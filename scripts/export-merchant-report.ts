@@ -40,6 +40,9 @@ function addressVal(addr: string): xdr.ScVal {
   return nativeToScVal(Address.fromString(addr), { type: "address" });
 }
 
+async function getMerchantRevenue(merchant: string): Promise<bigint> {
+  const { MultiEndpointServer } = await import("./rpc-client.js");
+  const server = new MultiEndpointServer(RPC_URL);
 /** Convert stroops (bigint) to XLM string */
 function stroopsToXlm(stroops: bigint): string {
   const isNegative = stroops < 0n;
@@ -81,6 +84,10 @@ async function getMerchantRevenue(server: Server, merchant: string): Promise<big
   return BigInt(retval.i128().toString());
 }
 
+async function getMerchantSubscriberCount(merchant: string): Promise<number> {
+  const { MultiEndpointServer } = await import("./rpc-client.js");
+  const server = new MultiEndpointServer(RPC_URL);
+
 async function getMerchantSubscriberCount(server: Server, merchant: string): Promise<number> {
   if (!CONTRACT_ID) return 0;
   const response = await server.getEvents({
@@ -98,6 +105,7 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
     const userAddress = topic[1]?.toString();
     if (!userAddress) continue;
 
+    const eventTime = event.ledgerClosedAt ? Math.floor(Date.parse(event.ledgerClosedAt) / 1000) : 0;
     const eventTime = event.ledgerClosedAt ? new Date(event.ledgerClosedAt).getTime() / 1000 : 0;
 
     if (eventType === "subscribed") {
@@ -128,6 +136,9 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
   return count;
 }
 
+async function getMerchantRevenueHistory(merchant: string, days: number): Promise<bigint[]> {
+  const { MultiEndpointServer } = await import("./rpc-client.js");
+  const server = new MultiEndpointServer(RPC_URL);
 async function getMerchantRevenueHistory(server: Server, merchant: string, days: number): Promise<bigint[]> {
   if (!CONTRACT_ID) return [];
   const contract = new Contract(CONTRACT_ID);

@@ -18,6 +18,12 @@
  *   data/testnet-accounts.json
  */
 
+import { createHash } from "node:crypto";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { Keypair } from "@stellar/stellar-sdk";
+import { MultiEndpointServer } from "./rpc-client.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { Keypair, Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
@@ -73,6 +79,9 @@ async function fundViaFriendbot(publicKey: string, retries = 3): Promise<void> {
   }
 }
 
+// ── Funding ───────────────────────────────────────────────────────────────────
+
+async function isFunded(server: MultiEndpointServer, publicKey: string): Promise<boolean> {
 async function isAccountFunded(server: Server, publicKey: string): Promise<boolean> {
   try {
     await server.getAccount(publicKey);
@@ -96,6 +105,9 @@ function addressVal(addr: string): xdr.ScVal {
   return nativeToScVal(Address.fromString(addr), { type: "address" });
 }
 
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv);
+  const server = new MultiEndpointServer(RPC_URL);
 async function main() {
   const args = process.argv.slice(2);
   const reset = args.includes("--reset");
