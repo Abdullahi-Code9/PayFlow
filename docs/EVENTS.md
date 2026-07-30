@@ -107,6 +107,18 @@ Events related to subscription lifecycle.
   }
   ```
 
+### subscription_transferred
+- **Trigger**: `transfer_subscription()`
+- **Topic keys**: `["subscription_transferred", from_address, to_address]`
+- **Payload schema**: `(merchant: Address, amount: i128, interval: u64, token: Address)`
+- **JSON example**:
+  ```json
+  {
+    "topic": ["subscription_transferred", "GFROM...XYZ", "GTO...ABC"],
+    "data": ["GMERCH...DEF", 50000000, 2592000, "GTOKEN...GHI"]
+  }
+  ```
+
 ---
 
 ## Charge & Payment Events

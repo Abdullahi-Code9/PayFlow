@@ -6,8 +6,9 @@
  * the queue changes.  The panel auto-opens on a new submission.
  */
 
-export type TxEntryStatus = "pending" | "submitted" | "confirmed" | "failed";
+import { useState, useEffect } from "react";
 
+export type TxEntryStatus = "pending" | "submitted" | "confirmed" | "failed";
 export interface TxEntry {
   /** Unique entry id (monotonically increasing) */
   id: number;
@@ -123,7 +124,12 @@ export function _reset(): void {
   entries = [];
   panelOpen = false;
   listeners.clear();
-import { useState, useEffect } from "react";
+}
+
+// ---------------------------------------------------------------------------
+// Queue serialization helpers (used by useTransaction)
+// ---------------------------------------------------------------------------
+// ── Simple promise-serialisation queue (used by useTransaction) ────────────────
 
 type PromiseReturningCallback<T> = () => Promise<T>;
 
@@ -131,11 +137,20 @@ let queuePromise: Promise<void> = Promise.resolve();
 let pendingLabel: string | null = null;
 let queueDepth = 0;
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
+type QueueStateListener = () => void;
+const queueStateListeners = new Set<QueueStateListener>();
 
-function notify() {
-  for (const listener of listeners) {
+function notifyQueueState() {
+  for (const listener of queueStateListeners) {
+    listener();
+  }
+}
+
+type QueueListener = () => void;
+const queueListeners = new Set<QueueListener>();
+
+function notifyQueue() {
+  for (const listener of queueListeners) {
     listener();
   }
 }
@@ -148,14 +163,16 @@ export function enqueueTransaction<T>(
   if (!pendingLabel) {
     pendingLabel = label;
   }
-  notify();
+  notifyQueueState();
+  notifyQueue();
 
   const currentPromise = queuePromise;
 
   const nextPromise = new Promise<T>((resolve, reject) => {
     currentPromise.finally(async () => {
       pendingLabel = label;
-      notify();
+      notifyQueueState();
+      notifyQueue();
 
       try {
         const result = await buildAndSign();
@@ -167,7 +184,8 @@ export function enqueueTransaction<T>(
         if (queueDepth === 0) {
           pendingLabel = null;
         }
-        notify();
+        notifyQueueState();
+        notifyQueue();
       }
     });
   });
@@ -177,14 +195,18 @@ export function enqueueTransaction<T>(
   return nextPromise;
 }
 
+// ---------------------------------------------------------------------------
+// React hook for consuming queue depth / pending label in UI components
+// ---------------------------------------------------------------------------
+
 export function useTxQueue() {
   const [state, setState] = useState({ pendingLabel, queueDepth });
 
   useEffect(() => {
     const listener = () => setState({ pendingLabel, queueDepth });
-    listeners.add(listener);
+    queueStateListeners.add(listener);
     return () => {
-      listeners.delete(listener);
+      queueStateListeners.delete(listener);
     };
   }, []);
 
