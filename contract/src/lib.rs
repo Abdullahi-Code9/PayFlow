@@ -1,5 +1,5 @@
 #![no_std]
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, clippy::inconsistent_digit_grouping)]
 
 mod admin;
 mod batch;
@@ -821,12 +821,6 @@ impl FlowPay {
     /// Returns the default token address set during `initialize()`, or `None` if not initialized.
     pub fn get_token(env: Env) -> Option<Address> {
         storage::get_token(&env)
-    }
-
-    /// Upgrades the current contract WASM to `new_wasm_hash` (test only).
-    #[cfg(test)]
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        upgrade::upgrade(&env, new_wasm_hash);
     }
 
     pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
@@ -1730,7 +1724,7 @@ impl FlowPay {
     /// # Side Effects
     ///
     /// Moves the subscription struct to `new_user`, removes it from `user`,
-    /// refreshes TTL, and emits `sub_transferred`.
+    /// refreshes TTL, and emits `sub_transferred` and `subscription_transferred`.
     pub fn transfer_subscription(env: Env, user: Address, new_user: Address) {
         ensure_contract_not_paused(&env);
         user.require_auth();
@@ -1765,6 +1759,7 @@ impl FlowPay {
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
+        events::emit_subscription_transferred(&env, &user, &new_user, &sub);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1881,6 +1876,15 @@ impl FlowPay {
             i += 1;
         }
         result
+    }
+}
+
+#[contractimpl]
+#[cfg(test)]
+impl FlowPay {
+    /// Upgrades the current contract WASM to `new_wasm_hash` (test only).
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        upgrade::upgrade(&env, new_wasm_hash);
     }
 }
 

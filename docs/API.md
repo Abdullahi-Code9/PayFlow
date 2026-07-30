@@ -2601,6 +2601,7 @@ For a complete reference of all events with detailed schemas and examples, see [
 | `paused` | `("paused", user_address)` | `()` |
 | `resumed` | `("resumed", user_address)` | `()` |
 | `referred` | `("referred", user_address)` | `referrer_address` |
+| `subscription_transferred` | `("subscription_transferred", from_address, to_address)` | `(merchant, amount, interval, token)` |
 | `subscription_repaired` | `("subscription_repaired", user_address)` | `fixed_inconsistencies: u32` |
 
 ---

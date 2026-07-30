@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(clippy::bool_assert_comparison, unused_variables, dead_code, clippy::inconsistent_digit_grouping)]
 
 use super::*;
 use soroban_sdk::{
@@ -17,6 +18,9 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
@@ -1786,6 +1790,8 @@ fn test_batch_charge_over_default_limit_panics() {
 
     let mut users = soroban_sdk::Vec::new(&env);
     for _ in 0..51 {
+        let u = Address::generate(&env);
+        users.push_back(u);
         users.push_back(Address::generate(&env));
     }
 
@@ -5264,6 +5270,50 @@ fn test_transfer_subscription_succeeds() {
 }
 
 #[test]
+fn test_transfer_subscription_event_emitted() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let new_user = Address::generate(&env);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&new_user, &10_000_0000000);
+    let token = TokenClient::new(&env, &token_addr);
+    token.approve(&new_user, &contract_id, &10_000_0000000, &200);
+
+    client.transfer_subscription(&user, &new_user);
+
+    let mut seen_transfer_event = false;
+    for (_, topics, data) in env.events().all().iter() {
+        let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic_symbol == Symbol::new(&env, "subscription_transferred") {
+            let topic_from: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            let topic_to: Address = topics.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic_from, user);
+            assert_eq!(topic_to, new_user);
+
+            let event_payload: (Address, i128, u64, Address) = data.try_into_val(&env).unwrap();
+            assert_eq!(event_payload.0, merchant);
+            assert_eq!(event_payload.1, 1_0000000);
+            assert_eq!(event_payload.2, 86400);
+            assert_eq!(event_payload.3, token_addr);
+            seen_transfer_event = true;
+        }
+    }
+
+    assert!(seen_transfer_event, "expected a subscription_transferred event");
+}
+
+#[test]
 #[should_panic]
 fn test_transfer_subscription_to_active_user_panics() {
     let (env, contract_id, token_addr, user, merchant) = setup();
@@ -5313,12 +5363,19 @@ fn test_subscribe_zero_allowance_panics() {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
 
     let sac = StellarAssetClient::new(&env, &token_addr);
     sac.mint(&user, &10_000_0000000);
+
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     // Deliberately grant zero allowance â€” no approve() call.
     let client = FlowPayClient::new(&env, &contract_id);
@@ -5349,6 +5406,9 @@ fn test_subscribe_zero_allowance_does_not_write_storage() {
     let token_addr = token_id.address();
 
     let contract_id = env.register_contract(None, FlowPay);
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     let user = Address::generate(&env);
 
@@ -5384,6 +5444,10 @@ fn test_subscribe_exact_allowance_succeeds() {
 
     let amount: i128 = 5_0000000;
 
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
+
     // Approve exactly amount â€” no more, no less.
     let token = TokenClient::new(&env, &token_addr);
     token.approve(&user, &contract_id, &amount, &200);
@@ -5417,6 +5481,10 @@ fn test_resubscribe_zero_allowance_panics() {
     sac.mint(&user, &10_000_0000000);
 
     let amount: i128 = 1_0000000;
+
+    env.as_contract(&contract_id, || {
+        whitelist::set_whitelist_enabled(&env, false);
+    });
 
     // First subscribe with sufficient allowance.
     let token = TokenClient::new(&env, &token_addr);
