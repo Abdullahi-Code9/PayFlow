@@ -37,6 +37,7 @@ pub fn get_daily_limit(env: &Env, user: &Address) -> Option<i128> {
 
 The public contract method exposes this to callers. No auth is required — reading your own limit is a view-only operation:
 
+
 ```rust
 /// Returns the current daily spending limit for the caller, or `None` if unset.
 pub fn get_daily_limit(env: Env, user: Address) -> Option<i128> {
@@ -155,6 +156,7 @@ test test::test_daily_limit_visibility_and_spend_tracking ... ok
 ### What is a keeper and how do I run one locally?
 
 A keeper is an off-chain scheduler (cron job, AWS Lambda, or any scripted process) that calls `batch_charge(users)` on the FlowPay contract whenever subscribers' billing intervals have elapsed. Because Soroban has no native scheduler, recurring charges depend entirely on this external trigger. To run one locally, maintain a list of subscriber addresses sourced from contract events and invoke `batch_charge` on a schedule — the contract handles all eligibility checks, so ineligible users are silently skipped without aborting the transaction. See [Architecture — Keeper Service](docs/ARCHITECTURE.md#keeper-service) for the recommended pattern.
+
 
 ### How do I spin up a local validation environment for testing?
 
