@@ -162,12 +162,12 @@ pub fn get_top_merchants_by_subs(env: &Env, limit: u32) -> Vec<(Address, u32)> {
     }
 
     let len = list.len();
-    let mut sorted = Vec::new(env);
+    let mut sorted: Vec<(Address, u32)> = Vec::new(env);
     if len > 0 {
         for i in 0..len {
             let item = list.get(i).unwrap();
             let mut inserted = false;
-            let mut new_sorted = Vec::new(env);
+            let mut new_sorted: Vec<(Address, u32)> = Vec::new(env);
             let s_len = sorted.len();
 
             for j in 0..s_len {

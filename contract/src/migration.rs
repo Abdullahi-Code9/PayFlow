@@ -70,7 +70,35 @@ pub fn migrate(env: &Env, users: Vec<Address>) {
         }
         version = 2;
     }
+    if version < 3 {
+    // v2 → v3: created_at field introduced; existing subscriptions
+    // are stamped with sentinel value 0 (age unknown)
+    set_schema_version(env, 3);
+}
 
+    let user_count = users.len();
+
+    // Transform provided users' data from v1 to v2
+    for user in users.into_iter() {
+        let key = DataKey::Subscription(user.clone());
+
+        // Attempt to read the entry as a V1 subscription
+        if let Some(v1_sub) = env.storage().persistent().get::<_, SubscriptionV1>(&key) {
+            let v2_sub = Subscription {
+                merchant: v1_sub.merchant,
+                amount: v1_sub.amount,
+                interval: v1_sub.interval,
+                last_charged: v1_sub.last_charged,
+                active: v1_sub.active,
+                paused: false, // new field in v2
+                token: v1_sub.token,
+                referrer: v1_sub.referrer,
+                label: v1_sub.label,
+                trial_duration: v1_sub.trial_duration,
+                created_at: 0, // sentinel — subscription existed before this field was tracked
+            };
+
+            env.storage().persistent().set(&key, &v2_sub);
     if version < 3 {
         let mut updated_count: u32 = 0;
         for user in users.into_iter() {
