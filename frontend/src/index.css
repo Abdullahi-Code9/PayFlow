@@ -619,6 +619,32 @@ input::placeholder {
   font-weight: var(--font-medium);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Contract Pause Banner (feat/contract-pause-banner)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.contract-pause-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: #1e1b4b;
+  color: #c7d2fe;
+  border: 1px solid #4338ca;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.contract-pause-banner__icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.contract-pause-banner__message {
+  flex: 1;
+}
+
 .merchant-row {
   display: flex;
   align-items: center;
