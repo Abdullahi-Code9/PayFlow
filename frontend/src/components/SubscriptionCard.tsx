@@ -22,10 +22,8 @@ import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import ErrorRecovery from "./ErrorRecovery";
 import SubscriptionHealthWidget from "./SubscriptionHealthWidget";
 import { Subscription } from "../types";
-import { BILLING_INTERVALS } from "../constants";
-import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
 import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
-import { getAllowance, buildCancelTx } from "../stellar";
+import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
@@ -218,14 +216,10 @@ export default function SubscriptionCard({
   onRefresh,
   onCancelled,
 }: SubscriptionCardProps) {
-  const { mutate } = useSubscriptionSync(userKey);
-  const { isMobile } = useResponsive();
-  const { merchant, amount, interval, last_charged, active, paused } = subscription;
-  const { displayCurrentAmount } = useAmountDisplay();
-
   const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
+  const { displayCurrentAmount } = useAmountDisplay();
   const nextChargeTimestamp = last_charged + interval;
   const formattedAmount = displayCurrentAmount(amount);
 
@@ -236,12 +230,6 @@ export default function SubscriptionCard({
 
   // ── Pause / resume via hook ────────────────────────────────────────────────
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
-  const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
-  const [cancelLoading, setCancelLoading] = React.useState(false);
-  const [cancelStatus, setCancelStatus] = React.useState("");
-
-  // ── Pause / resume via hook ────────────────────────────────────────────────
-  const [showPauseConfirm, setShowPauseConfirm] = React.useState(false);
   const { pause, resume, pauseTx, resumeTx } = usePauseResume(userKey, onSign, onRefresh);
 
   // ── Allowance health state ─────────────────────────────────────────────────
@@ -333,23 +321,6 @@ export default function SubscriptionCard({
       // resumeTx.error holds the failure reason
     }
   };
-
-  // ── Allowance health state ─────────────────────────────────────────────────
-  const [allowance, setAllowance] = useState<bigint | null>(null);
-  const [allowanceLoading, setAllowanceLoading] = useState(true);
-  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
-
-  const amountBigInt = BigInt(amount);
-  const health = computeAllowanceHealth(allowance, amountBigInt);
-
-  useEffect(() => {
-    if (!active) return; // no point checking allowance on cancelled subs
-    setAllowanceLoading(true);
-    getAllowance(userKey)
-      .then((val) => setAllowance(val))
-      .catch(() => setAllowance(null)) // RPC error → "unknown" state
-      .finally(() => setAllowanceLoading(false));
-  }, [userKey, active]);
 
   let derivedPauseStatus = "";
   if (pauseTx.state === "pending") {

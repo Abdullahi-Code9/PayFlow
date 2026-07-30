@@ -27,6 +27,7 @@ interface Props {
   merchantKey: string;
   onSign: (xdr: string) => Promise<string>;
   refreshTrigger: number;
+  isPaused?: boolean;
 }
 
 function formatNextCharge(nextChargeAt: number): string {
@@ -34,7 +35,7 @@ function formatNextCharge(nextChargeAt: number): string {
   return date.toLocaleString();
 }
 
-export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger }: Props) {
+export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger, isPaused = false }: Props) {
   const [subscribers, setSubscribers] = useState<MerchantSubscriber[]>([]);
   const [revenue, setRevenue] = useState<bigint>(0n);
   const [revenueHistory, setRevenueHistory] = useState<bigint[]>([]);
@@ -186,7 +187,8 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger 
               <button
                 className="btn-primary w-full"
                 onClick={handleBatchCharge}
-                disabled={tx.status === "pending"}
+                disabled={tx.status === "pending" || isPaused}
+                aria-label={isPaused ? "Charge subscribers (unavailable during maintenance)" : undefined}
               >
                 {tx.status === "pending"
                   ? "Processing Batch Charge..."
