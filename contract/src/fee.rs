@@ -13,6 +13,24 @@ pub fn get_fee_bps(env: &Env) -> u32 {
     env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
 }
 
+/// Stores a custom fee recipient address for a specific merchant.
+pub fn set_merchant_fee_recipient(env: &Env, merchant: &Address, recipient: &Address) {
+    merchant.require_auth();
+    if recipient == &env.current_contract_address() {
+        env.panic_with_error(ContractError::InvalidRecipient);
+    }
+    env.storage()
+        .persistent()
+        .set(&DataKey::MerchantFeeRecipient(merchant.clone()), recipient);
+    crate::events::publish_merchant_fee_recipient_set(env, merchant, recipient);
+}
+
+/// Reads the custom fee recipient for a merchant if set.
+pub fn get_merchant_fee_recipient(env: &Env, merchant: &Address) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MerchantFeeRecipient(merchant.clone()))
+}
 
 /// Proposes a new fee collector and basis points.
 pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
@@ -35,7 +53,6 @@ pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
 
 /// Commits a pending fee proposal.
 pub fn commit_fee(env: &Env) {
-    
     let pending: (Address, u32) = env
         .storage()
         .temporary()
@@ -83,11 +100,14 @@ fn accumulate_protocol_fees(env: &Env, amount: i128) {
         .set(&DataKey::TotalProtocolFees, &(total + amount));
 }
 
-/// Transfers subscription charge amounts (fee to collector, net to merchant).
+/// Transfers subscription charge amounts (fee to collector/merchant fee recipient, net to merchant).
 /// Returns the fee amount deducted from the gross subscription amount.
 pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscription) -> i128 {
     let bps = get_fee_bps(env);
-    let fee_amount = match get_fee_collector(env) {
+    let fee_collector = get_merchant_fee_recipient(env, &sub.merchant)
+        .or_else(|| get_fee_collector(env));
+
+    let fee_amount = match fee_collector {
         Some(collector) if bps > 0 => {
             let fee = calculate_fee_amount(sub.amount, bps);
             if fee > 0 {
@@ -102,19 +122,12 @@ pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscriptio
     let net = sub.amount - fee_amount;
 
     let token_client = token::Client::new(env, &sub.token);
-    let merchant_dest: Address = env
-        .storage()
-        .persistent()
-        .get(&DataKey::MerchantFeeRecipient(sub.merchant.clone()))
-        .unwrap_or_else(|| sub.merchant.clone());
-    token_client.transfer_from(&env.current_contract_address(), user, &merchant_dest, &net);
+    token_client.transfer_from(&env.current_contract_address(), user, &sub.merchant, &net);
 
     fee_amount
 }
 
-/// Transfers a pay-per-use amount (fee to collector, net to `recipient`).
-/// Mirrors `transfer_subscription_charge` but accepts an explicit token and
-/// recipient instead of reading them from the subscription's merchant.
+/// Transfers a pay-per-use amount (fee to collector/merchant fee recipient, net to `recipient`).
 /// Returns the fee amount deducted from the gross amount.
 pub fn transfer_pay_per_use(
     env: &Env,
@@ -124,7 +137,10 @@ pub fn transfer_pay_per_use(
     recipient: &Address,
 ) -> i128 {
     let bps = get_fee_bps(env);
-    let fee_amount = match get_fee_collector(env) {
+    let fee_collector = get_merchant_fee_recipient(env, recipient)
+        .or_else(|| get_fee_collector(env));
+
+    let fee_amount = match fee_collector {
         Some(collector) if bps > 0 => {
             let fee = calculate_fee_amount(amount, bps);
             if fee > 0 {
