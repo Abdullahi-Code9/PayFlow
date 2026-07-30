@@ -6,6 +6,8 @@
  * with color-coded event types and human-readable amounts (stroops → XLM).
  */
 
+import { Server } from "@stellar/stellar-sdk/rpc";
+import { EventDedupCache, createCacheKey } from "./event-dedup.js";
 import { MultiEndpointServer } from "./rpc-client.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────────
@@ -13,6 +15,7 @@ import { MultiEndpointServer } from "./rpc-client.js";
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const POLL_INTERVAL_MS = 3000;
+const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG?.includes("payflow");
 
 if (!CONTRACT_ID) {
   console.error("Error: CONTRACT_ID environment variable is required");
@@ -194,9 +197,21 @@ function printEvent(event: ParsedEvent): void {
 
 // ── Main Polling Loop ───────────────────────────────────────────────────────────
 
+/**
+ * Log a debug message when DEBUG env is set.
+ */
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    console.error(colors.dim + "[DEBUG]" + colors.reset, ...args);
+  }
+}
+
+const server = new Server(RPC_URL);
+const dedupCache = new EventDedupCache();
 const server = new MultiEndpointServer(RPC_URL);
 const seenEvents = new Set<string>();
 let currentLedger = 0;
+let totalEventsSeen = 0;
 
 async function fetchAndPrintEvents(): Promise<void> {
   try {
@@ -221,10 +236,25 @@ async function fetchAndPrintEvents(): Promise<void> {
       const parsed = parseEvent(event);
       if (!parsed) continue;
       
-      if (!seenEvents.has(parsed.id)) {
-        seenEvents.add(parsed.id);
+      // Deduplication check
+      if (!dedupCache.checkAndRecord(parsed.txHash, parsed.type, parsed.ledger)) {
         newEvents.push(parsed);
+      } else {
+        debugLog(`Duplicate event skipped: ${createCacheKey(parsed.txHash, parsed.type, parsed.ledger)}`);
       }
+    }
+    
+    // Periodic stats logging (every 100 events processed)
+    totalEventsSeen += response.events.length;
+    if (totalEventsSeen >= 100) {
+      const s = dedupCache.stats;
+      console.error(
+        colors.dim + `[DEDUP] ${s.deduplicatedTotal} duplicates skipped, ` +
+        `${s.totalProcessed} unique processed, ` +
+        `${s.size}/${s.maxSize} cache entries, ` +
+        `${s.evictions} evictions` + colors.reset
+      );
+      totalEventsSeen = 0;
     }
     
     // Sort by timestamp and print new events
@@ -247,6 +277,7 @@ async function main(): Promise<void> {
   console.log(colors.dim + `RPC: ${RPC_URL}` + colors.reset);
   console.log(colors.dim + `Contract: ${CONTRACT_ID}` + colors.reset);
   console.log(colors.dim + `Polling every ${POLL_INTERVAL_MS}ms...` + colors.reset);
+  console.log(colors.dim + `Dedup cache: ${dedupCache.stats.maxSize} entries` + (dedupCache.stats.maxSize > 0 ? `, TTL: ${process.env.EVENT_DEDUP_TTL_MS || "none"}` : "") + colors.reset);
   console.log("");
   
   // Initial fetch
