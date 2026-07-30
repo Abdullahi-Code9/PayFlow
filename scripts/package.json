@@ -8,7 +8,8 @@
     "check-allowances": "tsx check-allowances.ts"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.0.0"
+    "@stellar/stellar-sdk": "^12.0.0",
+    "zod": "3.23.8"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

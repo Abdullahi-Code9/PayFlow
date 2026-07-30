@@ -1,16 +1,20 @@
 /**
  * validate-config.ts — Environment configuration validator for FlowPay.
  *
- * Reads .env or .env.local and validates that all required variables are present
- * and correctly formatted. Useful for CI pipelines and local developer workflows.
+ * Reads .env or .env.local and validates that all required keeper variables
+ * are present and correctly formatted using Zod schemas defined in config.ts.
+ * Useful for CI pipelines and local developer workflows.
  *
  * Usage:
- *   npx ts-node scripts/validate-config.ts
+ *   npx tsx scripts/validate-config.ts
  *
  * Checks:
- *   - Required variables exist and are non-empty
- *   - Contract IDs start with 'C' and are 56 characters long
- *   - RPC URLs are valid URLs with a protocol
+ *   - CONTRACT_ID     — non-empty, valid Stellar contract ID
+ *   - RPC_URL          — valid http/https URL
+ *   - SECRET_KEY       — valid Stellar secret key
+ *   - BATCH_SIZE       — integer 1–200
+ *   - INTERVAL_SECONDS — integer ≥ 60
+ *   - WEBHOOK_URL      — optional, validated if present
  *
  * Exit codes:
  *   0 — all validations passed
@@ -18,17 +22,12 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+import { ConfigSchema, formatConfigErrors } from "./config";
 
-interface ValidationResult {
-  variable: string;
-  passed: boolean;
-  reason?: string;
-}
-
-type Validator = (value: string) => { valid: boolean; reason?: string };
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── .env Parsing ─────────────────────────────────────────────────────────────
 
@@ -85,100 +84,9 @@ function loadEnv(projectRoot: string): Map<string, string> {
   }
 
   console.error("ERROR: No .env or .env.local file found in project root.");
-  console.error("  Create one from .env.example:");
-  console.error("    cp frontend/.env.example .env.local");
+  console.error("  Create one from .env.example or set required variables:");
+  console.error("    CONTRACT_ID, RPC_URL, SECRET_KEY, BATCH_SIZE, INTERVAL_SECONDS");
   process.exit(1);
-}
-
-// ── Validation Helpers ───────────────────────────────────────────────────────
-
-/**
- * Validate that a value is a Stellar contract ID.
- * Contract IDs begin with 'C' and are exactly 56 characters (base32-encoded).
- */
-function validateContractId(value: string): { valid: boolean; reason?: string } {
-  if (!value.startsWith("C")) {
-    return { valid: false, reason: "must start with 'C'" };
-  }
-  if (value.length !== 56) {
-    return { valid: false, reason: `must be 56 characters (got ${value.length})` };
-  }
-  // Stellar contract IDs use uppercase base32 (A-Z, 2-7)
-  if (!/^[A-Z2-7]+$/.test(value)) {
-    return { valid: false, reason: "contains invalid characters (expected base32: A-Z, 2-7)" };
-  }
-  return { valid: true };
-}
-
-/**
- * Validate that a value is a valid URL with a protocol.
- */
-function validateUrl(value: string): { valid: boolean; reason?: string } {
-  try {
-    const url = new URL(value);
-    if (!url.protocol || !["http:", "https:"].includes(url.protocol)) {
-      return { valid: false, reason: "must use http:// or https:// protocol" };
-    }
-    return { valid: true };
-  } catch {
-    return { valid: false, reason: "not a valid URL" };
-  }
-}
-
-/**
- * Validate presence only (non-empty).
- */
-function validatePresence(value: string): { valid: boolean; reason?: string } {
-  if (!value.trim()) {
-    return { valid: false, reason: "must not be empty" };
-  }
-  return { valid: true };
-}
-
-// ── Required Variables ───────────────────────────────────────────────────────
-
-/**
- * Configuration of required variables and their validation rules.
- * Uses repository conventions from frontend/.env.example.
- */
-const REQUIRED_VARIABLES: Array<{ name: string; validators: Validator[] }> = [
-  {
-    name: "VITE_CONTRACT_ID",
-    validators: [validatePresence, validateContractId],
-  },
-  {
-    name: "VITE_RPC_URL",
-    validators: [validatePresence, validateUrl],
-  },
-];
-
-// ── Validation Runner ────────────────────────────────────────────────────────
-
-function validateVariable(
-  name: string,
-  envVars: Map<string, string>,
-  validators: Validator[]
-): ValidationResult {
-  const value = envVars.get(name);
-
-  // Check presence
-  if (value === undefined) {
-    return { variable: name, passed: false, reason: "missing" };
-  }
-
-  if (!value.trim()) {
-    return { variable: name, passed: false, reason: "empty" };
-  }
-
-  // Run all validators
-  for (const validator of validators) {
-    const result = validator(value);
-    if (!result.valid) {
-      return { variable: name, passed: false, reason: result.reason };
-    }
-  }
-
-  return { variable: name, passed: true };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -187,37 +95,45 @@ function main(): void {
   const projectRoot = resolve(__dirname, "..");
   const envVars = loadEnv(projectRoot);
 
-  console.log("");
-
-  const results: ValidationResult[] = [];
-
-  for (const { name, validators } of REQUIRED_VARIABLES) {
-    const result = validateVariable(name, envVars, validators);
-    results.push(result);
+  // Convert Map to plain object for Zod
+  const envObject: Record<string, string | undefined> = {};
+  for (const [key, value] of envVars) {
+    envObject[key] = value;
   }
 
-  // Display results
-  let hasFailures = false;
+  console.log("");
 
-  for (const result of results) {
-    if (result.passed) {
-      console.log(`\u2713 ${result.variable}`);
-    } else {
-      console.log(`\u2717 ${result.variable} — ${result.reason}`);
-      hasFailures = true;
+  const result = ConfigSchema.safeParse(envObject);
+
+  if (result.success) {
+    const config = result.data;
+    console.log("✓ CONTRACT_ID ..............", config.CONTRACT_ID);
+    console.log("✓ RPC_URL ..................", config.RPC_URL);
+    console.log("✓ SECRET_KEY ...............", "******** (valid)");
+    console.log("✓ BATCH_SIZE ...............", config.BATCH_SIZE);
+    console.log("✓ INTERVAL_SECONDS .........", config.INTERVAL_SECONDS);
+    if (config.WEBHOOK_URL) {
+      console.log("✓ WEBHOOK_URL ..............", config.WEBHOOK_URL);
     }
+    if (config.NETWORK_PASSPHRASE) {
+      console.log("✓ NETWORK_PASSPHRASE .......", config.NETWORK_PASSPHRASE);
+    }
+    console.log("\nAll configuration checks passed.\n");
+    process.exit(0);
+  }
+
+  // Validation failed — display all issues with human-readable messages
+  const errors = formatConfigErrors(result.error);
+
+  console.log("Configuration validation failed:\n");
+  for (const msg of errors) {
+    console.log(`  ${msg}`);
   }
 
   console.log("");
-
-  if (hasFailures) {
-    const failCount = results.filter((r) => !r.passed).length;
-    console.log(`Validation failed: ${failCount} issue(s) found.`);
-    process.exit(1);
-  }
-
-  console.log(`All ${results.length} checks passed.`);
-  process.exit(0);
+  console.log(`Validation failed: ${errors.length} issue(s) found.`);
+  console.log("Fix the above errors and re-run.");
+  process.exit(1);
 }
 
 main();
