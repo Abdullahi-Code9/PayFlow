@@ -79,7 +79,6 @@ pub fn simulate_charge(env: &Env, user: Address) -> ChargeSimResult {
     ChargeSimResult::WouldSucceed
 }
 
-
 /// Returns the next charge timestamp for a subscription, or `None` if not chargeable.
 /// Handles the trial case: when `last_charged` is in the future, it is the trial end time.
 pub fn compute_next_charge_at(sub: &Subscription) -> Option<u64> {
@@ -98,6 +97,12 @@ pub fn try_auto_resume(env: &Env, user: &Address, sub: &mut Subscription, now: u
         if let Some(expiry_ts) = expiry {
             if now >= expiry_ts {
                 sub.paused = false;
+                if now > sub.last_charged {
+                    sub.last_charged = now;
+                }
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Subscription(user.clone()), sub);
                 sub.active = true;
                 env.storage().persistent().set(&DataKey::Subscription(user.clone()), sub);
                 storage::clear_pause_expiry(env, user);

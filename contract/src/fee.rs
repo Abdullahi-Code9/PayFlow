@@ -40,7 +40,7 @@ pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
     if collector == env.current_contract_address() {
         env.panic_with_error(ContractError::InvalidFeeCollector);
     }
-    
+
     let pending = (collector.clone(), bps);
     env.storage()
         .temporary()
