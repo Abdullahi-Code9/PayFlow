@@ -1662,6 +1662,10 @@ impl FlowPay {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
                     pending_merchant_rev_count += 1;
+        for i in 0..total_merchants {
+            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
+                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
+                    pending_merchant_rev_count += 1;
         let mut pending_merchant_revenue_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
