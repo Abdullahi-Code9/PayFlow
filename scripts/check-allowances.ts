@@ -8,6 +8,7 @@
 
 import { MultiEndpointServer } from "./rpc-client.js";
 import {
+import { logger } from "./logger";
   Contract,
   Networks,
   TransactionBuilder,
@@ -24,8 +25,8 @@ const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET) as string;
 
 if (!CONTRACT_ID) {
-  console.error("Error: CONTRACT_ID environment variable is required");
-  console.error(
+  logger.error("Error: CONTRACT_ID environment variable is required");
+  logger.error(
     "Usage: CONTRACT_ID=your_contract_id tsx check-allowances.ts [--file subscribers.txt] [--json] [address1 address2 ...]"
   );
   process.exit(1);
@@ -49,13 +50,13 @@ async function parseAddressListFromFile(path: string): Promise<string[]> {
       .map((line) => line.trim())
       .filter((line) => line.length > 0 && !line.startsWith("#"));
   } catch (err) {
-    console.error(`Error reading file ${path}: ${err}`);
+    logger.error(`Error reading file ${path}: ${err}`);
     process.exit(1);
   }
 }
 
 function showHelp(): void {
-  console.log(`
+  logger.info(`
 Usage: tsx check-allowances.ts [options] [addresses...]
 
 Options:
@@ -242,25 +243,25 @@ function printHumanReadable(results: AuditResult[]): void {
   const noSub = results.filter((r) => r.error === "no_subscription");
   const healthy = results.filter((r) => !r.atRisk && !r.error && r.active);
 
-  console.log(`\nAudited ${results.length} subscriber(s)\n`);
+  logger.info(`\nAudited ${results.length} subscriber(s)\n`);
 
   if (noSub.length > 0) {
-    console.log(`${noSub.length} with no subscription:`);
+    logger.info(`${noSub.length} with no subscription:`);
     for (const r of noSub) {
-      console.log(`  ${r.address}`);
+      logger.info(`  ${r.address}`);
     }
-    console.log();
+    logger.info();
   }
 
   if (atRisk.length > 0) {
-    console.log(`${atRisk.length} at risk of failed charge:`);
+    logger.info(`${atRisk.length} at risk of failed charge:`);
     const header =
       "  ADDRESS".padEnd(56) +
       "AMOUNT".padStart(10) +
       "ALLOWANCE".padStart(12) +
       "GAP".padStart(10) +
       "TOKEN".padStart(56);
-    console.log(header);
+    logger.info(header);
     for (const r of atRisk) {
       const line =
         r.address.padEnd(56) +
@@ -268,28 +269,28 @@ function printHumanReadable(results: AuditResult[]): void {
         stroopsToXlm(r.allowance).padStart(12) +
         stroopsToXlm(r.gap).padStart(10) +
         r.token.padStart(56);
-      console.log(`  ${line}`);
+      logger.info(`  ${line}`);
     }
-    console.log();
+    logger.info();
   }
 
   if (healthy.length > 0) {
-    console.log(`${healthy.length} healthy:`);
+    logger.info(`${healthy.length} healthy:`);
     for (const r of healthy) {
-      console.log(
+      logger.info(
         `  ${r.address.padEnd(56)} ${stroopsToXlm(r.subscriptionAmount).padStart(10)} ${stroopsToXlm(r.allowance).padStart(10)}`
       );
     }
-    console.log();
+    logger.info();
   }
 
-  console.log(
+  logger.info(
     `Summary: healthy=${healthy.length}, atRisk=${atRisk.length}, noSubscription=${noSub.length}`
   );
 }
 
 function printJson(results: AuditResult[]): void {
-  console.log(JSON.stringify(results, null, 2));
+  logger.info(JSON.stringify(results, null, 2));
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────────
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
     } else if (arg === "--file") {
       filePath = argv[++i];
     } else if (arg.startsWith("-")) {
-      console.error(`Unknown option: ${arg}`);
+      logger.error(`Unknown option: ${arg}`);
       showHelp();
     } else {
       addresses.push(arg);
@@ -328,7 +329,7 @@ async function main(): Promise<void> {
   }
 
   if (allAddresses.length === 0) {
-    console.error("No valid addresses provided.");
+    logger.error("No valid addresses provided.");
     process.exit(1);
   }
 
@@ -346,6 +347,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`Fatal error: ${error}`);
+  logger.error(`Fatal error: ${error}`);
   process.exit(1);
 });

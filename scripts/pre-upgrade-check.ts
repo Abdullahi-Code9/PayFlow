@@ -22,6 +22,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { MultiEndpointServer } from "./rpc-client.js";
+import { logger } from "./logger";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -82,28 +83,28 @@ function scValToString(val: xdr.ScVal): string {
 
 async function main(): Promise<void> {
   if (!CONTRACT_ID) {
-    console.error("Error: CONTRACT_ID environment variable is required.");
+    logger.error("Error: CONTRACT_ID environment variable is required.");
     process.exit(1);
   }
 
-  console.log("=== FlowPay Pre-Upgrade Check ===");
-  console.log(`Contract : ${CONTRACT_ID}`);
-  console.log(`RPC URL  : ${RPC_URL}`);
-  console.log(`Network  : ${NETWORK_PASSPHRASE}`);
-  console.log("");
+  logger.info("=== FlowPay Pre-Upgrade Check ===");
+  logger.info(`Contract : ${CONTRACT_ID}`);
+  logger.info(`RPC URL  : ${RPC_URL}`);
+  logger.info(`Network  : ${NETWORK_PASSPHRASE}`);
+  logger.info("");
 
   // 1. Admin address
   const adminVal = await simulateReadOnly("get_admin");
   const admin = scValToString(adminVal);
-  console.log(`Admin address      : ${admin}`);
+  logger.info(`Admin address      : ${admin}`);
 
   // 2. Active subscription count
   const countVal = await simulateReadOnly("get_active_count");
   const activeCount = scValToString(countVal);
-  console.log(`Active subscriptions: ${activeCount}`);
+  logger.info(`Active subscriptions: ${activeCount}`);
 
   if (Number(activeCount) > 0) {
-    console.warn(
+    logger.warn(
       `  ⚠  ${activeCount} active subscription(s) will be affected by a storage migration.`
     );
   }
@@ -111,23 +112,23 @@ async function main(): Promise<void> {
   // 3. Schema version
   const versionVal = await simulateReadOnly("get_schema_version");
   const schemaVersion = scValToString(versionVal);
-  console.log(`Schema version     : ${schemaVersion}`);
+  logger.info(`Schema version     : ${schemaVersion}`);
   if (Number(schemaVersion) < 2) {
-    console.warn("  ⚠  Schema is below current version 2 — run migrate() after upgrading.");
+    logger.warn("  ⚠  Schema is below current version 2 — run migrate() after upgrading.");
   }
 
-  console.log("");
+  logger.info("");
 
   // 4. Confirmation gate
   if (!CONFIRM) {
-    console.log("Checks complete. Re-run with --confirm to proceed with the upgrade.");
+    logger.info("Checks complete. Re-run with --confirm to proceed with the upgrade.");
     process.exit(0);
   }
 
-  console.log("✔  --confirm flag present. Safe to proceed with upgrade.");
+  logger.info("✔  --confirm flag present. Safe to proceed with upgrade.");
 }
 
 main().catch((err) => {
-  console.error("Pre-upgrade check failed:", err instanceof Error ? err.message : err);
+  logger.error("Pre-upgrade check failed:", err instanceof Error ? err.message : err);
   process.exit(1);
 });

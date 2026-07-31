@@ -26,6 +26,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 import { ConfigSchema, formatConfigErrors } from "./config";
+import { logger } from "./logger";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -74,18 +75,18 @@ function loadEnv(projectRoot: string): Map<string, string> {
   const envDefault = resolve(projectRoot, ".env");
 
   if (existsSync(envLocal)) {
-    console.log(`Reading configuration from: .env.local`);
+    logger.info(`Reading configuration from: .env.local`);
     return parseEnvFile(envLocal);
   }
 
   if (existsSync(envDefault)) {
-    console.log(`Reading configuration from: .env`);
+    logger.info(`Reading configuration from: .env`);
     return parseEnvFile(envDefault);
   }
 
-  console.error("ERROR: No .env or .env.local file found in project root.");
-  console.error("  Create one from .env.example or set required variables:");
-  console.error("    CONTRACT_ID, RPC_URL, SECRET_KEY, BATCH_SIZE, INTERVAL_SECONDS");
+  logger.error("ERROR: No .env or .env.local file found in project root.");
+  logger.error("  Create one from .env.example or set required variables:");
+  logger.error("    CONTRACT_ID, RPC_URL, SECRET_KEY, BATCH_SIZE, INTERVAL_SECONDS");
   process.exit(1);
 }
 
@@ -101,38 +102,38 @@ function main(): void {
     envObject[key] = value;
   }
 
-  console.log("");
+  logger.info("");
 
   const result = ConfigSchema.safeParse(envObject);
 
   if (result.success) {
     const config = result.data;
-    console.log("✓ CONTRACT_ID ..............", config.CONTRACT_ID);
-    console.log("✓ RPC_URL ..................", config.RPC_URL);
-    console.log("✓ SECRET_KEY ...............", "******** (valid)");
-    console.log("✓ BATCH_SIZE ...............", config.BATCH_SIZE);
-    console.log("✓ INTERVAL_SECONDS .........", config.INTERVAL_SECONDS);
+    logger.info("✓ CONTRACT_ID ..............", config.CONTRACT_ID);
+    logger.info("✓ RPC_URL ..................", config.RPC_URL);
+    logger.info("✓ SECRET_KEY ...............", "******** (valid)");
+    logger.info("✓ BATCH_SIZE ...............", config.BATCH_SIZE);
+    logger.info("✓ INTERVAL_SECONDS .........", config.INTERVAL_SECONDS);
     if (config.WEBHOOK_URL) {
-      console.log("✓ WEBHOOK_URL ..............", config.WEBHOOK_URL);
+      logger.info("✓ WEBHOOK_URL ..............", config.WEBHOOK_URL);
     }
     if (config.NETWORK_PASSPHRASE) {
-      console.log("✓ NETWORK_PASSPHRASE .......", config.NETWORK_PASSPHRASE);
+      logger.info("✓ NETWORK_PASSPHRASE .......", config.NETWORK_PASSPHRASE);
     }
-    console.log("\nAll configuration checks passed.\n");
+    logger.info("\nAll configuration checks passed.\n");
     process.exit(0);
   }
 
   // Validation failed — display all issues with human-readable messages
   const errors = formatConfigErrors(result.error);
 
-  console.log("Configuration validation failed:\n");
+  logger.info("Configuration validation failed:\n");
   for (const msg of errors) {
-    console.log(`  ${msg}`);
+    logger.info(`  ${msg}`);
   }
 
-  console.log("");
-  console.log(`Validation failed: ${errors.length} issue(s) found.`);
-  console.log("Fix the above errors and re-run.");
+  logger.info("");
+  logger.info(`Validation failed: ${errors.length} issue(s) found.`);
+  logger.info("Fix the above errors and re-run.");
   process.exit(1);
 }
 
