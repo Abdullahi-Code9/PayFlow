@@ -90,6 +90,106 @@ function loadEnv(projectRoot: string): Map<string, string> {
   process.exit(1);
 }
 
+// ── Validation Helpers ───────────────────────────────────────────────────────
+
+/**
+ * Validate that a value is a Stellar contract ID.
+ * Contract IDs begin with 'C' and are exactly 56 characters (base32-encoded).
+ */
+function validateContractId(value: string): {
+  valid: boolean;
+  reason?: string;
+} {
+  if (!value.startsWith("C")) {
+    return { valid: false, reason: "must start with 'C'" };
+  }
+  if (value.length !== 56) {
+    return {
+      valid: false,
+      reason: `must be 56 characters (got ${value.length})`,
+    };
+  }
+  // Stellar contract IDs use uppercase base32 (A-Z, 2-7)
+  if (!/^[A-Z2-7]+$/.test(value)) {
+    return {
+      valid: false,
+      reason: "contains invalid characters (expected base32: A-Z, 2-7)",
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * Validate that a value is a valid URL with a protocol.
+ */
+function validateUrl(value: string): { valid: boolean; reason?: string } {
+  try {
+    const url = new URL(value);
+    if (!url.protocol || !["http:", "https:"].includes(url.protocol)) {
+      return { valid: false, reason: "must use http:// or https:// protocol" };
+    }
+    return { valid: true };
+  } catch {
+    return { valid: false, reason: "not a valid URL" };
+  }
+}
+
+/**
+ * Validate presence only (non-empty).
+ */
+function validatePresence(value: string): { valid: boolean; reason?: string } {
+  if (!value.trim()) {
+    return { valid: false, reason: "must not be empty" };
+  }
+  return { valid: true };
+}
+
+// ── Required Variables ───────────────────────────────────────────────────────
+
+/**
+ * Configuration of required variables and their validation rules.
+ * Uses repository conventions from frontend/.env.example.
+ */
+const REQUIRED_VARIABLES: Array<{ name: string; validators: Validator[] }> = [
+  {
+    name: "VITE_CONTRACT_ID",
+    validators: [validatePresence, validateContractId],
+  },
+  {
+    name: "VITE_RPC_URL",
+    validators: [validatePresence, validateUrl],
+  },
+];
+
+// ── Validation Runner ────────────────────────────────────────────────────────
+
+function validateVariable(
+  name: string,
+  envVars: Map<string, string>,
+  validators: Validator[],
+): ValidationResult {
+  const value = envVars.get(name);
+
+  // Check presence
+  if (value === undefined) {
+    return { variable: name, passed: false, reason: "missing" };
+  }
+
+  if (!value.trim()) {
+    return { variable: name, passed: false, reason: "empty" };
+  }
+
+  // Run all validators
+  for (const validator of validators) {
+    const result = validator(value);
+    if (!result.valid) {
+      return { variable: name, passed: false, reason: result.reason };
+    }
+  }
+
+  return { variable: name, passed: true };
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 function main(): void {

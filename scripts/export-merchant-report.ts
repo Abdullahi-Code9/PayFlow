@@ -10,6 +10,20 @@
  *   VITE_CONTRACT_ID         — Deployed FlowPay contract ID
  */
 
+import {
+  Contract,
+  Networks,
+  TransactionBuilder,
+  BASE_FEE,
+  nativeToScVal,
+  Address,
+  xdr,
+} from "@stellar/stellar-sdk";
+
+const RPC_URL =
+  process.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
+const NETWORK_PASSPHRASE =
+  process.env.VITE_NETWORK_PASSPHRASE ?? Networks.TESTNET;
 import { Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { logger } from "./logger";
@@ -96,7 +110,10 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
     limit: 1000,
   });
 
-  const latestSubscribeByUser = new Map<string, { merchant: string; timestamp: number }>();
+  const latestSubscribeByUser = new Map<
+    string,
+    { merchant: string; timestamp: number }
+  >();
   const latestCancelByUser = new Map<string, number>();
 
   for (const event of response.events) {
@@ -106,6 +123,7 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
     const userAddress = topic[1]?.toString();
     if (!userAddress) continue;
 
+    const eventTime = Date.parse(event.ledgerClosedAt) || 0;
     const eventTime = Number(
       (event as { ledgerCloseTime?: number }).ledgerCloseTime ??
         (event.ledgerClosedAt ? Date.parse(event.ledgerClosedAt) / 1000 : 0)
@@ -117,7 +135,10 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
       if (!subscribedMerchant) continue;
       const existing = latestSubscribeByUser.get(userAddress);
       if (!existing || eventTime > existing.timestamp) {
-        latestSubscribeByUser.set(userAddress, { merchant: subscribedMerchant, timestamp: eventTime });
+        latestSubscribeByUser.set(userAddress, {
+          merchant: subscribedMerchant,
+          timestamp: eventTime,
+        });
       }
     } else if (eventType === "cancelled") {
       const existing = latestCancelByUser.get(userAddress) || 0;
@@ -139,6 +160,12 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
   return count;
 }
 
+async function getMerchantRevenueHistory(
+  merchant: string,
+  days: number,
+): Promise<bigint[]> {
+  const { Server } = await import("@stellar/stellar-sdk/rpc");
+  const server = new Server(RPC_URL);
 async function getMerchantRevenueHistory(merchant: string, days: number): Promise<bigint[]> {
   const { MultiEndpointServer } = await import("./rpc-client.js");
   const server = new MultiEndpointServer(RPC_URL);
@@ -152,7 +179,11 @@ async function getMerchantRevenueHistory(server: Server, merchant: string, days:
     networkPassphrase: NETWORK_PASSPHRASE,
   })
     .addOperation(
-      contract.call("get_merchant_revenue_history", addressVal(merchant), nativeToScVal(days, { type: "u32" }))
+      contract.call(
+        "get_merchant_revenue_history",
+        addressVal(merchant),
+        nativeToScVal(days, { type: "u32" }),
+      ),
     )
     .setTimeout(30)
     .build();
@@ -235,6 +266,10 @@ async function main() {
     else if (args[i] === "--fields" && args[i + 1]) fieldsStr = args[++i];
   }
 
+  if (!merchant || !output) {
+    console.error(
+      "Usage: npx tsx scripts/export-merchant-report.ts --merchant GXXXX... --output report.json",
+    );
   if (!["csv", "json", "ndjson"].includes(format)) {
     logger.error(`ERROR: Invalid format '${format}'. Supported formats: csv, json, ndjson`);
     process.exit(1);
@@ -290,6 +325,7 @@ async function main() {
   }
 }
 
+main().catch(console.error);
 main().catch((err) => {
   logger.error("Export report failed:", err instanceof Error ? err.message : err);
   process.exit(1);

@@ -394,9 +394,7 @@ describe("SubscribeForm address book integration", () => {
       />
     );
 
-    expect(
-      screen.getByRole("button", { name: /select.*address book/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /select.*address book/i })).toBeInTheDocument();
   });
 
   it("opens AddressBook modal when button is clicked", async () => {

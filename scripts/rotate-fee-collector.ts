@@ -6,12 +6,17 @@ import { logger } from "./logger";
 // Replace these placeholders with your actual contract client import if available
 async function get_fee(): Promise<{ collector: string; fee_bps: number }> {
   // Simulates fetching current fee config
+  console.log("Fetching current fee configuration...");
+  return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 };
   logger.info("Fetching current fee configuration...");
   return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 }; 
 }
 
 async function set_fee(newCollector: string, feeBps: number): Promise<void> {
   // Simulates executing the contract transaction
+  console.log(
+    `Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`,
+  );
   logger.info(`Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`);
 }
 
@@ -52,7 +57,9 @@ async function main() {
 
   // Acceptance Criteria: Prompts for confirmation (unless --yes flag)
   if (!autoConfirm) {
-    const answer = await question("Are you sure you want to rotate the fee collector? (y/N): ");
+    const answer = await question(
+      "Are you sure you want to rotate the fee collector? (y/N): ",
+    );
     rl.close();
     if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
       logger.info("Operation aborted by user.");
@@ -71,8 +78,16 @@ async function main() {
   // Acceptance Criteria: Verifies change by reading get_fee after update
   logger.info("\n=== Verifying On-Chain Update ===");
   const updatedFee = await get_fee();
-  
+
   if (updatedFee.collector === newCollector) {
+    console.log("✅ Success: Fee collector rotated correctly!");
+    console.log(
+      `New Verification -> Collector: ${updatedFee.collector}, BPS: ${updatedFee.fee_bps}`,
+    );
+  } else {
+    console.error(
+      "❌ Error: Verification failed. Collector address does not match expected update.",
+    );
     logger.info("✅ Success: Fee collector rotated correctly!");
     logger.info(`New Verification -> Collector: ${updatedFee.collector}, BPS: ${updatedFee.fee_bps}`);
   } else {

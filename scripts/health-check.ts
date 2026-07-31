@@ -20,21 +20,35 @@
  *   1 — unhealthy (one or more calls failed or returned invalid data)
  */
 
+import {
+  Account,
+  Contract,
+  Networks,
+  TransactionBuilder,
+  BASE_FEE,
+  Address,
+} from "@stellar/stellar-sdk";
+import { Server } from "@stellar/stellar-sdk/rpc";
 import { Contract, Networks, TransactionBuilder, BASE_FEE, Address } from "@stellar/stellar-sdk";
 import { MultiEndpointServer } from "./rpc-client.js";
 import { logger } from "./logger";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-const CONTRACT_ID = process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
-const RPC_URL = process.env.RPC_URL || process.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID =
+  process.env.CONTRACT_ID || process.env.VITE_CONTRACT_ID || "";
+const RPC_URL =
+  process.env.RPC_URL ||
+  process.env.VITE_RPC_URL ||
+  "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
   process.env.NETWORK === "mainnet"
     ? Networks.PUBLIC
     : process.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET;
 
 // A zero-funded source account used solely for simulating read-only calls.
-const SIMULATION_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const SIMULATION_SOURCE =
+  "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -30,6 +30,69 @@ import { Keypair, Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVa
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { logger } from "./logger";
 
+// ── Configuration ────────────────────────────────────────────────────────────
+
+const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
+const FRIENDBOT_URL =
+  process.env.FRIENDBOT_URL || "https://friendbot.stellar.org";
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+
+// ── Argument parsing ─────────────────────────────────────────────────────────
+
+interface SetupArgs {
+  seed: number;
+  users: number;
+  merchants: number;
+}
+
+function parseArgs(argv: string[]): SetupArgs {
+  let seed = 1;
+  let users = 3;
+  let merchants = 1;
+
+  for (let i = 2; i < argv.length; i++) {
+    switch (argv[i]) {
+      case "--seed":
+        seed = parseInt(argv[++i], 10);
+        break;
+      case "--users":
+        users = parseInt(argv[++i], 10);
+        break;
+      case "--merchants":
+        merchants = parseInt(argv[++i], 10);
+        break;
+      default:
+        console.error(`Unknown argument: ${argv[i]}`);
+        console.error(
+          "Usage: testnet-setup.ts --seed <n> --users <n> --merchants <n>",
+        );
+        process.exit(1);
+    }
+  }
+
+  if (
+    !Number.isInteger(seed) ||
+    !Number.isInteger(users) ||
+    !Number.isInteger(merchants)
+  ) {
+    console.error("ERROR: --seed, --users, and --merchants must be integers.");
+    process.exit(1);
+  }
+
+  if (users < 1 || merchants < 1) {
+    console.error("ERROR: --users and --merchants must each be at least 1.");
+    process.exit(1);
+  }
+
+  return { seed, users, merchants };
+}
+
+// ── Deterministic identity derivation ────────────────────────────────────────
+
+interface Identity {
+  role: "user" | "merchant";
+  index: number;
 const RPC_URL = process.env.RPC_URL || process.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org";
 const FRIENDBOT_URL = process.env.FRIENDBOT_URL || "https://friendbot.stellar.org";
 const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE || process.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET;
@@ -50,6 +113,19 @@ interface AccountMeta {
   };
 }
 
+/**
+ * Derives a stable ed25519 keypair from (seed, role, index) so the same
+ * --seed always reproduces the same set of testnet identities.
+ */
+function deriveKeypair(
+  seed: number,
+  role: "user" | "merchant",
+  index: number,
+): Keypair {
+  const hash = createHash("sha256")
+    .update(`payflow-testnet-setup:${seed}:${role}:${index}`)
+    .digest();
+  return Keypair.fromRawEd25519Seed(hash);
 interface TestnetManifest {
   createdAt: string;
   updatedAt: string;
@@ -78,6 +154,30 @@ async function fundViaFriendbot(publicKey: string, retries = 3): Promise<void> {
     }
     await delay(1500 * attempt);
   }
+
+  const identities: Identity[] = [];
+  for (let i = 0; i < args.users; i++) {
+    const kp = deriveKeypair(args.seed, "user", i);
+    identities.push({
+      role: "user",
+      index: i,
+      publicKey: kp.publicKey(),
+      secretKey: kp.secret(),
+    });
+  }
+  for (let i = 0; i < args.merchants; i++) {
+    const kp = deriveKeypair(args.seed, "merchant", i);
+    identities.push({
+      role: "merchant",
+      index: i,
+      publicKey: kp.publicKey(),
+      secretKey: kp.secret(),
+    });
+  }
+
+  writeFileSync(path, JSON.stringify(identities, null, 2));
+  console.log(`Wrote manifest: ${path}`);
+  return identities;
 }
 
 // ── Funding ───────────────────────────────────────────────────────────────────
@@ -92,6 +192,16 @@ async function isAccountFunded(server: Server, publicKey: string): Promise<boole
   }
 }
 
+async function fundViaFriendbot(publicKey: string): Promise<void> {
+  const response = await fetch(
+    `${FRIENDBOT_URL}?addr=${encodeURIComponent(publicKey)}`,
+  );
+  if (!response.ok && response.status !== 400) {
+    // Friendbot returns 400 if the account is already funded — treat that as success.
+    throw new Error(
+      `Friendbot funding failed for ${publicKey}: HTTP ${response.status}`,
+    );
+  }
 function generateAccount(role: "admin" | "merchant" | "subscriber", name: string): AccountMeta {
   const kp = Keypair.random();
   return {
@@ -136,6 +246,10 @@ async function main() {
     }
   }
 
+  console.log(
+    `Setting up testnet fixtures: seed=${args.seed} users=${args.users} merchants=${args.merchants}`,
+  );
+  console.log("");
   if (!manifest) {
     const admin = generateAccount("admin", "Admin Account");
     const merchant = generateAccount("merchant", "Primary Test Merchant");
@@ -197,6 +311,21 @@ async function main() {
     logger.info(`    Amount: ${details.amountXlm} XLM (${details.amountStroops} stroops), Interval: ${details.intervalSeconds}s`);
   }
 
+  console.log("");
+  console.log(`Manifest: ${manifestPath(args.seed)}`);
+  console.log(
+    "Next step: use the Soroban CLI with these identities to call subscribe()/charge()",
+  );
+  console.log(
+    "against your deployed contract — see docs/TESTING.md, Integration Testing section.",
+  );
+}
+
+main().catch((err) => {
+  console.error(
+    "testnet-setup failed:",
+    err instanceof Error ? err.message : err,
+  );
   manifest.updatedAt = new Date().toISOString();
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2), "utf-8");
 

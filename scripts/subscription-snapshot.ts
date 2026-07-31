@@ -35,7 +35,10 @@ const SIM_SOURCE = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
 
 const server = new MultiEndpointServer(RPC_URL);
 
-async function simulate(method: string, ...args: xdr.ScVal[]): Promise<xdr.ScVal | null> {
+async function simulate(
+  method: string,
+  ...args: xdr.ScVal[]
+): Promise<xdr.ScVal | null> {
   const contract = new Contract(CONTRACT_ID);
   const tx = new TransactionBuilder(new Account(SIM_SOURCE, "0"), {
     fee: BASE_FEE,
@@ -62,18 +65,22 @@ interface SubscriptionEntry {
   token?: string;
 }
 
-function decodeSubscription(address: string, val: xdr.ScVal): SubscriptionEntry {
+function decodeSubscription(
+  address: string,
+  val: xdr.ScVal,
+): SubscriptionEntry {
   if (val.switch().name === "scvVoid") return { address, found: false };
 
   // get_subscription returns Option<Subscription>; unwrap if Some
   const inner = val.switch().name === "scvMap" ? val : val;
   const entries: Map<string, xdr.ScVal> = new Map();
-  for (const e of (inner.map() ?? [])) {
+  for (const e of inner.map() ?? []) {
     entries.set(e.key().sym().toString(), e.val());
   }
 
   const get = (k: string) => entries.get(k);
-  const u64 = (v: xdr.ScVal | undefined) => (v ? BigInt(v.u64().toString()) : 0n);
+  const u64 = (v: xdr.ScVal | undefined) =>
+    v ? BigInt(v.u64().toString()) : 0n;
   const i128 = (v: xdr.ScVal | undefined) => (v ? v.i128().toString() : "0");
   const bool = (v: xdr.ScVal | undefined) => (v ? v.b() : false);
   const addr = (v: xdr.ScVal | undefined) =>
@@ -100,7 +107,11 @@ function decodeSubscription(address: string, val: xdr.ScVal): SubscriptionEntry 
 function readAddresses(): string[] {
   const args = process.argv.slice(2);
   const flagIdx = args.indexOf("--addresses");
-  if (flagIdx !== -1) return args[flagIdx + 1].split(",").map((a) => a.trim()).filter(Boolean);
+  if (flagIdx !== -1)
+    return args[flagIdx + 1]
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
 
   const fileIdx = args.indexOf("--file");
   if (fileIdx !== -1) {
@@ -118,6 +129,16 @@ function readAddresses(): string[] {
 }
 
 async function main() {
+  if (!CONTRACT_ID) {
+    console.error("CONTRACT_ID required");
+    process.exit(1);
+  }
+
+  const addresses = readAddresses();
+  if (addresses.length === 0) {
+    console.error("No addresses provided");
+    process.exit(1);
+  }
   if (!CONTRACT_ID) { logger.error("CONTRACT_ID required"); process.exit(1); }
 
   const addresses = readAddresses();
@@ -130,7 +151,7 @@ async function main() {
     subscriptions.push(
       retval && retval.switch().name !== "scvVoid"
         ? decodeSubscription(addr, retval)
-        : { address: addr, found: false }
+        : { address: addr, found: false },
     );
   }
 
@@ -151,4 +172,8 @@ async function main() {
   }
 }
 
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+});
 main().catch((e) => { logger.error(e instanceof Error ? e.message : e); process.exit(1); });

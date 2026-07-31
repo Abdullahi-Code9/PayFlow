@@ -63,6 +63,8 @@ async function sendWebhook(url: string, payload: AlertPayload): Promise<void> {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
+      console.error(
+        `Webhook responded with HTTP ${response.status}: ${response.statusText}`,
       logger.error(
         `Webhook responded with HTTP ${response.status}: ${response.statusText}`
       );
@@ -100,7 +102,7 @@ async function main(): Promise<void> {
     `SELECT data FROM events
      WHERE event_name = 'charge_failed'
        AND timestamp >= ?
-     ORDER BY timestamp DESC`
+     ORDER BY timestamp DESC`,
   );
 
   const rows = query.all(sinceTs) as Array<{ data: string }>;
