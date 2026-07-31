@@ -106,9 +106,42 @@ pub fn publish_cancelled_with_refund(env: &Env, user: &Address, refund_amount: i
     );
 }
 
-pub fn publish_min_interval_updated(env: &Env, seconds: u64) {
-    env.events()
-        .publish((Symbol::new(env, "min_interval"),), seconds);
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrialExtendedEventData {
+    pub additional_seconds: u64,
+    pub new_last_charged: u64,
+    pub ledger_sequence: u32,
+}
+
+pub fn publish_trial_extended(
+    env: &Env,
+    user: &Address,
+    additional_seconds: u64,
+    new_last_charged: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "trial_extended"), user.clone()),
+        TrialExtendedEventData {
+            additional_seconds,
+            new_last_charged,
+            ledger_sequence: env.ledger().sequence(),
+        },
+    );
+}
+
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinIntervalSetEventData {
+    pub old: u64,
+    pub new: u64,
+}
+
+pub fn publish_min_interval_set(env: &Env, old: u64, new: u64) {
+    env.events().publish(
+        (Symbol::new(env, "min_interval_set"),),
+        MinIntervalSetEventData { old, new },
+    );
 }
 
 pub fn publish_merchant_history_cleared(env: &Env, merchant: &Address) {
@@ -135,6 +168,22 @@ pub fn publish_subscription_transferred(env: &Env, old_user: &Address, new_user:
     env.events().publish(
         (Symbol::new(env, "sub_transferred"), old_user.clone()),
         new_user.clone(),
+    );
+}
+
+pub fn emit_subscription_transferred(env: &Env, from: &Address, to: &Address, sub: &Subscription) {
+    env.events().publish(
+        (
+            Symbol::new(env, "subscription_transferred"),
+            from.clone(),
+            to.clone(),
+        ),
+        (
+            sub.merchant.clone(),
+            sub.amount,
+            sub.interval,
+            sub.token.clone(),
+        ),
     );
 }
 
@@ -168,8 +217,12 @@ pub fn publish_daily_limit_removed(env: &Env, user: &Address) {
 }
 
 pub fn publish_fee_cleared(env: &Env) {
+    env.events().publish((Symbol::new(env, "fee_cleared"),), ());
+}
+
+pub fn publish_daily_window_started(env: &Env, user: &Address) {
     env.events()
-        .publish((Symbol::new(env, "fee_cleared"),), ());
+        .publish((Symbol::new(env, "daily_window_started"), user.clone()), ());
 }
 pub fn publish_subscription_amount_updated(
     env: &Env,
@@ -263,8 +316,10 @@ pub fn publish_grace_period_committed(env: &Env, seconds: u64) {
 }
 
 pub fn publish_subscription_auto_resumed(env: &Env, user: &Address) {
-    env.events()
-        .publish((Symbol::new(env, "subscription_auto_resumed"), user.clone()), ());
+    env.events().publish(
+        (Symbol::new(env, "subscription_auto_resumed"), user.clone()),
+        (),
+    );
 }
 
 pub fn publish_migration_completed(env: &Env, version: u32, user_count: u32) {
@@ -273,3 +328,16 @@ pub fn publish_migration_completed(env: &Env, version: u32, user_count: u32) {
         (version, user_count),
     );
 }
+
+pub fn publish_subscriber_index_ttl_extended(env: &Env, count: u64) {
+    env.events()
+        .publish((Symbol::new(env, "subscriber_index_ttl_extended"),), count);
+}
+
+pub fn publish_merchant_fee_recipient_set(env: &Env, merchant: &Address, recipient: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "merchant_fee_recipient_set"), merchant.clone()),
+        recipient.clone(),
+    );
+}
+

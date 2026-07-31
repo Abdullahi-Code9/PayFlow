@@ -17,6 +17,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
+import { logger } from "./logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ function utcDayBounds(dateStr: string): { startMs: number; endMs: number } {
 function previousUtcDay(): string {
   const now = new Date();
   const yesterday = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
   );
   return yesterday.toISOString().slice(0, 10);
 }
@@ -76,7 +77,7 @@ function main(): void {
 
   // Validate date format
   if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-    console.error(`Invalid date format: ${targetDate}. Expected YYYY-MM-DD.`);
+    logger.error(`Invalid date format: ${targetDate}. Expected YYYY-MM-DD.`);
     process.exit(1);
   }
 
@@ -88,13 +89,13 @@ function main(): void {
   try {
     db = new DatabaseSync(dbPath, { open: true });
   } catch (err) {
-    console.error(`Failed to open database at ${dbPath}: ${err}`);
+    logger.error(`Failed to open database at ${dbPath}: ${err}`);
     process.exit(1);
   }
 
   const query = db.prepare(
     `SELECT event_name, data FROM events
-     WHERE timestamp >= ? AND timestamp < ?`
+     WHERE timestamp >= ? AND timestamp < ?`,
   );
 
   const rows = query.all(startSec, endSec) as Array<{
@@ -142,7 +143,7 @@ function main(): void {
     net_merchant_revenue: totalAmount - totalFees,
   };
 
-  console.log(JSON.stringify(summary, null, 2));
+  logger.info(JSON.stringify(summary, null, 2));
 }
 
 main();

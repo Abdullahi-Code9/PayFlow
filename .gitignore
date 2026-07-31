@@ -191,6 +191,7 @@ config/local.json
 .agents/
 .claude/
 skills-lock.json
+issue.md
 
 # Generated testnet test-fixture manifests (contain throwaway testnet secret keys)
 scripts/.testnet-manifest.*.json

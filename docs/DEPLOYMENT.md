@@ -63,6 +63,12 @@ VITE_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 
 > **Warning:** FlowPay has not been formally audited. Do not manage real funds on Mainnet until an independent security audit is complete.
 
+FlowPay is currently deployed on **Testnet only**. When you are ready for Mainnet, follow the full phased checklist (security gates, key management, pre-deploy verification, deploy commands, post-deploy smoke tests, and go-live):
+
+**→ [`MAINNET-DEPLOYMENT.md`](MAINNET-DEPLOYMENT.md)**
+
+Quick script form (only after audit + checklist Phase 0–1):
+
 ```bash
 bash scripts/deploy.sh --network mainnet --source <DEPLOYER_KEYPAIR> --token <SAC_ADDRESS>
 ```
@@ -188,3 +194,10 @@ FlowPay does not support automatic rollback. To revert to a previous WASM:
 | `VITE_CONTRACT_ID` | Yes | `""` | Deployed contract ID |
 | `VITE_RPC_URL` | No | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint |
 | `VITE_NETWORK_PASSPHRASE` | No | `Networks.TESTNET` | Stellar network passphrase |
+
+---
+
+## Related operations
+
+- Keeper bot setup and cadence: [`docs/KEEPER.md`](KEEPER.md)
+- Advanced keeper scenarios (DLQ replay, multi-instance locks, RPC failover, incident pause): [`docs/operations/keeper_runbook.md`](operations/keeper_runbook.md)

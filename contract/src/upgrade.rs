@@ -4,8 +4,12 @@ use crate::{admin, errors::ContractError, events, DataKey};
 
 pub fn propose_upgrade(env: &Env, new_wasm_hash: BytesN<32>) {
     admin::require_admin(env);
-    env.storage().temporary().set(&DataKey::PendingUpgrade, &new_wasm_hash);
-    env.storage().temporary().extend_ttl(&DataKey::PendingUpgrade, 17280, 17280);
+    env.storage()
+        .temporary()
+        .set(&DataKey::PendingUpgrade, &new_wasm_hash);
+    env.storage()
+        .temporary()
+        .extend_ttl(&DataKey::PendingUpgrade, 17280, 17280);
     events::publish_upgrade_proposed(env, &new_wasm_hash);
 }
 

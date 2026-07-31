@@ -79,6 +79,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -207,7 +208,20 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistEnabled"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      }
+                    ]
                   }
                 }
               }
@@ -929,7 +943,7 @@
               },
               {
                 "error": {
-                  "contract": 19
+                  "contract": 3
                 }
               }
             ],
@@ -939,7 +953,7 @@
                   "string": "failing with contract error"
                 },
                 {
-                  "u32": 19
+                  "u32": 3
                 }
               ]
             }
@@ -961,7 +975,7 @@
               },
               {
                 "error": {
-                  "contract": 19
+                  "contract": 3
                 }
               }
             ],
@@ -986,7 +1000,7 @@
               },
               {
                 "error": {
-                  "contract": 19
+                  "contract": 3
                 }
               }
             ],
@@ -1011,7 +1025,7 @@
               },
               {
                 "error": {
-                  "contract": 19
+                  "contract": 3
                 }
               }
             ],
@@ -1067,7 +1081,7 @@
               },
               {
                 "error": {
-                  "contract": 19
+                  "contract": 3
                 }
               }
             ],

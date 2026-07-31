@@ -4,6 +4,8 @@ import { friendlyError } from "../utils/errors";
 import SubscriptionCard from "./SubscriptionCard";
 import SubscriptionCardSkeleton from "./Skeleton";
 import ErrorBoundary from "./ErrorBoundary";
+import ErrorRecovery from "./ErrorRecovery";
+
 
 // Lazy-load SubscriptionHistory so it is excluded from the main chunk (Issue #445).
 const SubscriptionHistory = lazy(() => import("./SubscriptionHistory"));
@@ -12,6 +14,7 @@ import DailyLimitCard from "./DailyLimitCard";
 import DailyLimitModal from "./DailyLimitModal";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import AllowanceDisplay from "./AllowanceDisplay";
+import ReferralPanel from "./ReferralPanel";
 import ToastContainer from "./Toast";
 import EventFeed from "./EventFeed";
 import SubscriptionExport from "./SubscriptionExport";
@@ -20,6 +23,7 @@ import { usePolling } from "../hooks/usePolling";
 import { useToast } from "../hooks/useToast";
 import { useRpcHealth } from "../hooks/useRpcHealth";
 import { useTransaction } from "../hooks/useTransaction";
+import { useResponsive } from "../hooks/useResponsive";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 
 interface Props {
@@ -29,6 +33,7 @@ interface Props {
   announce: (message: string) => void;
   onCancelled?: () => void;
   onPayPerUse?: (amount: bigint) => void;
+  isPaused?: boolean;
 }
 
 export default function Dashboard({
@@ -38,10 +43,12 @@ export default function Dashboard({
   announce,
   onCancelled,
   onPayPerUse,
+  isPaused = false,
 }: Props) {
   const { subscription: sub, loading, refresh } = useSubscriptionSync(userKey, refreshTrigger);
   const { toasts, addToast, removeToast } = useToast();
   const { status: rpcStatus, latencyMs: rpcLatency, error: rpcError } = useRpcHealth();
+  const { isMobile } = useResponsive();
   const ppuTx = useTransaction();
   const [showDailyLimit, setShowDailyLimit] = useState(false);
   const [showIncreaseAllowance, setShowIncreaseAllowance] = useState(false);
@@ -107,7 +114,7 @@ export default function Dashboard({
   const ppuPending = ppuTx.status === "pending";
 
   return (
-    <div className="dashboard">
+    <div className={`dashboard${isMobile ? " dashboard--mobile" : ""}`}>
       {rpcStatus === "degraded" && (
         <div className="network-warning network-warning--degraded" role="alert">
           <span>⚠️</span>
@@ -199,11 +206,20 @@ export default function Dashboard({
               )}
 
               <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} />
+              <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} isPaused={isPaused} />
               {ppuPending && (
                 <p className="status-text status-text--pending">Confirming payment…</p>
               )}
+              <ErrorRecovery
+                error={ppuTx.error}
+                onIncreaseAllowance={() => setShowIncreaseAllowance(true)}
+                onViewDailyLimit={() => setShowDailyLimit(true)}
+                dailyLimit={sub.amount} // We don't have exactly the daily limit fetched, but could be fetched or omitted.
+              />
+              <ReferralPanel publicKey={userKey} />
             </>
           )}
+
         </>
       )}
 
