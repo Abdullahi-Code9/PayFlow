@@ -13,11 +13,23 @@
  */
 import { useState, useEffect } from "react";
 
+function safeMatchMedia(query: string): boolean {
+  try {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    const result = window.matchMedia(query);
+    return result ? result.matches : false;
+  } catch {
+    return false;
+  }
+}
+
 export function useResponsive() {
   const getBreakpoints = () => ({
-    isMobile: window.matchMedia("(max-width: 639px)").matches,
-    isTablet: window.matchMedia("(min-width: 640px) and (max-width: 1023px)").matches,
-    isDesktop: window.matchMedia("(min-width: 1024px)").matches,
+    isMobile: safeMatchMedia("(max-width: 639px)"),
+    isTablet: safeMatchMedia("(min-width: 640px) and (max-width: 1023px)"),
+    isDesktop: safeMatchMedia("(min-width: 1024px)"),
   });
 
   const [breakpoints, setBreakpoints] = useState(getBreakpoints);

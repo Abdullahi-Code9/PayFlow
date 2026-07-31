@@ -64,4 +64,8 @@ pub enum ContractError {
     ContractPausedError = 30,
     /// Returned when a provided recipient address is invalid (e.g., contract address)
     InvalidRecipient = 32,
+    /// Returned when a configured global volume cap is not positive
+    InvalidVolumeCap = 33,
+    /// Returned when configured fee bounds are inconsistent (min > max, or max > 10000)
+    InvalidFeeBounds = 34,
 }

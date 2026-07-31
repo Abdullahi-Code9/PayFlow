@@ -1,5 +1,6 @@
 import { parseArgs } from "util";
 import readline from "readline";
+import { logger } from "./logger";
 
 // Mocking contract invocation wrapper based on project standard patterns
 // Replace these placeholders with your actual contract client import if available
@@ -7,6 +8,8 @@ async function get_fee(): Promise<{ collector: string; fee_bps: number }> {
   // Simulates fetching current fee config
   console.log("Fetching current fee configuration...");
   return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 };
+  logger.info("Fetching current fee configuration...");
+  return { collector: "GDQW...OLD_ADDRESS", fee_bps: 250 }; 
 }
 
 async function set_fee(newCollector: string, feeBps: number): Promise<void> {
@@ -14,6 +17,7 @@ async function set_fee(newCollector: string, feeBps: number): Promise<void> {
   console.log(
     `Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`,
   );
+  logger.info(`Executing set_fee with Collector: ${newCollector}, BPS: ${feeBps}...`);
 }
 
 const rl = readline.createInterface({
@@ -39,17 +43,17 @@ async function main() {
 
   // Acceptance Criteria: Requires --new-collector argument
   if (!newCollector) {
-    console.error("Error: Missing required argument --new-collector");
+    logger.error("Error: Missing required argument --new-collector");
     process.exit(1);
   }
 
   // Acceptance Criteria: Reads and displays current fee collector before change
   const currentFee = await get_fee();
-  console.log("\n=== Current Fee Configuration ===");
-  console.log(`Collector: ${currentFee.collector}`);
-  console.log(`Fee BPS:  ${currentFee.fee_bps}\n`);
+  logger.info("\n=== Current Fee Configuration ===");
+  logger.info(`Collector: ${currentFee.collector}`);
+  logger.info(`Fee BPS:  ${currentFee.fee_bps}\n`);
 
-  console.log(`Target New Collector: ${newCollector}`);
+  logger.info(`Target New Collector: ${newCollector}`);
 
   // Acceptance Criteria: Prompts for confirmation (unless --yes flag)
   if (!autoConfirm) {
@@ -58,21 +62,21 @@ async function main() {
     );
     rl.close();
     if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
-      console.log("Operation aborted by user.");
+      logger.info("Operation aborted by user.");
       process.exit(0);
     }
   } else {
     rl.close();
-    console.log("--yes flag detected. Skipping interactive confirmation.");
+    logger.info("--yes flag detected. Skipping interactive confirmation.");
   }
 
   // Acceptance Criteria: Calls set_fee preserving existing fee_bps
-  console.log("\nInitiating rotation...");
+  logger.info("\nInitiating rotation...");
   await set_fee(newCollector, currentFee.fee_bps);
-  console.log("Transaction successfully confirmed on-chain.");
+  logger.info("Transaction successfully confirmed on-chain.");
 
   // Acceptance Criteria: Verifies change by reading get_fee after update
-  console.log("\n=== Verifying On-Chain Update ===");
+  logger.info("\n=== Verifying On-Chain Update ===");
   const updatedFee = await get_fee();
 
   if (updatedFee.collector === newCollector) {
@@ -84,11 +88,15 @@ async function main() {
     console.error(
       "❌ Error: Verification failed. Collector address does not match expected update.",
     );
+    logger.info("✅ Success: Fee collector rotated correctly!");
+    logger.info(`New Verification -> Collector: ${updatedFee.collector}, BPS: ${updatedFee.fee_bps}`);
+  } else {
+    logger.error("❌ Error: Verification failed. Collector address does not match expected update.");
     process.exit(1);
   }
 }
 
 main().catch((err) => {
-  console.error("Fatal execution error:", err);
+  logger.error("Fatal execution error:", err);
   process.exit(1);
 });

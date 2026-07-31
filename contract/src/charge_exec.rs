@@ -1,12 +1,83 @@
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{contracttype, Address, Env};
 
 use crate::batch::ChargeResult;
 use crate::events;
 use crate::fee;
+use crate::grace;
 use crate::merchant_stats;
 use crate::storage;
 use crate::subscription_history;
 use crate::{extend_subscription_ttl, DataKey, Subscription};
+
+/// Outcome of dry-running/simulating a charge() call.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ChargeSimResult {
+    WouldSucceed,
+    NotDue,
+    Inactive,
+    InsufficientAllowance,
+    GracePeriodElapsed,
+    ContractPaused,
+    SubscriptionPaused,
+}
+
+/// Simulates a charge for a subscription without making state modifications.
+pub fn simulate_charge(env: &Env, user: Address) -> ChargeSimResult {
+    if storage::is_contract_paused(env) {
+        return ChargeSimResult::ContractPaused;
+    }
+
+    let key = DataKey::Subscription(user.clone());
+    let sub_opt: Option<Subscription> = env.storage().persistent().get(&key);
+
+    let mut sub = match sub_opt {
+        None => return ChargeSimResult::Inactive,
+        Some(s) => s,
+    };
+
+    let now = env.ledger().timestamp();
+
+    if sub.paused {
+        let mut auto_resumed = false;
+        if let Some(expiry_ts) = storage::get_pause_expiry(env, &user) {
+            if now >= expiry_ts {
+                sub.paused = false;
+                sub.active = true;
+                auto_resumed = true;
+            }
+        }
+        if !auto_resumed {
+            return ChargeSimResult::SubscriptionPaused;
+        }
+    }
+
+    if !sub.active {
+        return ChargeSimResult::Inactive;
+    }
+
+    let next = match compute_next_charge_at(&sub) {
+        Some(n) => n,
+        None => return ChargeSimResult::SubscriptionPaused,
+    };
+
+    if now < next {
+        return ChargeSimResult::NotDue;
+    }
+
+    let grace_period = grace::get_grace_period(env);
+    if grace_period > 0 && now > next + grace_period {
+        return ChargeSimResult::GracePeriodElapsed;
+    }
+
+    let token_client = soroban_sdk::token::Client::new(env, &sub.token);
+    let allowance = token_client.allowance(&user, &env.current_contract_address());
+    if allowance < sub.amount {
+        return ChargeSimResult::InsufficientAllowance;
+    }
+
+    ChargeSimResult::WouldSucceed
+}
 
 /// Returns the next charge timestamp for a subscription, or `None` if not chargeable.
 /// Handles the trial case: when `last_charged` is in the future, it is the trial end time.
@@ -29,6 +100,10 @@ pub fn try_auto_resume(env: &Env, user: &Address, sub: &mut Subscription, now: u
                 if now > sub.last_charged {
                     sub.last_charged = now;
                 }
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Subscription(user.clone()), sub);
+                sub.active = true;
                 env.storage().persistent().set(&DataKey::Subscription(user.clone()), sub);
                 storage::clear_pause_expiry(env, user);
                 events::publish_subscription_auto_resumed(env, user);
@@ -46,10 +121,10 @@ pub fn precheck_charge(
     grace_period: u64,
 ) -> Result<(), ChargeResult> {
     let next = compute_next_charge_at(sub).ok_or({
-        if !sub.active {
-            ChargeResult::Inactive
-        } else {
+        if sub.paused {
             ChargeResult::Paused
+        } else {
+            ChargeResult::Inactive
         }
     })?;
     if now < next {
