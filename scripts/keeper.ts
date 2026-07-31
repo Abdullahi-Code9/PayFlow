@@ -3,6 +3,8 @@
  * keeper.ts — PayFlow Keeper Bot
  *
  * Processes recurring payments by calling batch_charge() on a regular interval.
+ * Uses buildOptimizedBatches() so only ready subscribers are charged, ordered by
+ * grace urgency and overdue age.
  * Supports dry-run mode via DRY_RUN=true env var for simulation without state changes.
  *
  * Usage:
@@ -34,6 +36,7 @@
  */
 
 import { Server } from "@stellar/stellar-sdk/rpc";
+import { buildOptimizedBatches } from "./batch-optimizer";
 import {
   Contract,
   Keypair,
@@ -485,25 +488,35 @@ async function runCycle(): Promise<CycleReport> {
     return report;
   }
 
-  const totalSubscribers = await getSubscriberCount();
-  if (totalSubscribers === 0) {
-    log(isDryRun, "No subscribers found");
+  // Ensure optimizer sees the same contract/RPC configuration as this keeper.
+  process.env.CONTRACT_ID = CONTRACT_ID;
+  process.env.RPC_URL = RPC_URL;
+  process.env.NETWORK_PASSPHRASE = NETWORK_PASSPHRASE;
+
+  const optimized = await buildOptimizedBatches();
+  report.totalChecked = optimized.ready_count + optimized.deferred_count;
+
+  if (optimized.batches.length === 0) {
+    log(
+      isDryRun,
+      `No ready subscribers (ready=${optimized.ready_count} deferred=${optimized.deferred_count})`
+    );
     return report;
   }
 
-  log(isDryRun, `Found ${totalSubscribers} subscribers, processing in batches of ${BATCH_SIZE}`);
+  log(
+    isDryRun,
+    `Optimizer selected ${optimized.ready_count} ready user(s) in ${optimized.batches.length} batch(es); deferred=${optimized.deferred_count}`
+  );
 
-  let offset = 0;
-  while (offset < totalSubscribers) {
-    const users = await getSubscriberPage(offset, BATCH_SIZE);
-    if (users.length === 0) break;
+  for (const batch of optimized.batches) {
+    const users = batch.users;
+    const offset = batch.batch;
 
     if (isDryRun) {
       const pageResult = await processPageDryRun(users, offset);
-      report.totalChecked += pageResult.checked;
       report.totalCharged += pageResult.wouldCharge;
       report.totalVolume += pageResult.totalVolume;
-
       report.errors.push(...pageResult.errors);
 
       const skipDetails = Object.entries(pageResult.skipCounts)
@@ -512,12 +525,11 @@ async function runCycle(): Promise<CycleReport> {
 
       log(
         true,
-        `Page ${offset}: checked=${pageResult.checked} wouldCharge=${pageResult.wouldCharge} volume=${stroopsToXlm(pageResult.totalVolume)} XLM`
+        `Batch ${offset}: checked=${pageResult.checked} wouldCharge=${pageResult.wouldCharge} volume=${stroopsToXlm(pageResult.totalVolume)} XLM`
       );
       if (skipDetails) log(true, `  ${skipDetails}`);
     } else {
       const pageResult = await processPageLive(users, offset);
-      report.totalChecked += users.length;
       report.totalCharged += pageResult.charged;
       report.totalVolume += pageResult.totalVolume;
 
@@ -533,12 +545,10 @@ async function runCycle(): Promise<CycleReport> {
 
       log(
         false,
-        `Page ${offset}: charged=${pageResult.charged} volume=${stroopsToXlm(pageResult.totalVolume)} XLM${pageResult.txHash ? ` tx=${pageResult.txHash}` : ""}`
+        `Batch ${offset}: charged=${pageResult.charged} volume=${stroopsToXlm(pageResult.totalVolume)} XLM${pageResult.txHash ? ` tx=${pageResult.txHash}` : ""}`
       );
       if (skipDetails) log(false, `  ${skipDetails}`);
     }
-
-    offset += BATCH_SIZE;
   }
 
   const skipDetails = Object.entries(report.totalSkips)
