@@ -1,6 +1,6 @@
 # Multi-Token Architecture Guide
 
-This guide explains how PayFlow supports multiple Stellar Asset Contract (SAC) tokens, how that capability is implemented at the storage level, how to deploy and operate it, what it means for protocol fees, how a subscriber switches tokens, and — just as importantly — what it does *not* do.
+This guide explains how PayFlow supports multiple Stellar Asset Contract (SAC) tokens, how that capability is implemented at the storage level, how to deploy and operate it, what it means for protocol fees, how a subscriber switches tokens, and — just as importantly — what it does _not_ do.
 
 If you only need the mechanics of approving an allowance and subscribing with a specific token, jump to [Subscribing with Custom Tokens](#subscribing-with-custom-tokens) and the [Full CLI Walkthrough](#full-cli-walkthrough). If you're deciding how to deploy PayFlow for a multi-token product, read [Architecture](#architecture-per-subscription-tokens) and [Deployment Models](#deployment-models) first.
 
@@ -112,7 +112,7 @@ if token.clone().to_xdr(env).get(7) == Some(0) {
 }
 ```
 
-This check confirms the address is *shaped like* a contract address. It does **not** verify the contract actually implements the token interface, has been initialized, or is a genuine SAC rather than an arbitrary Soroban contract — that failure mode surfaces later, as a panic inside `check_allowance()` or the first `transfer_from()`, when the non-token contract's `allowance`/`transfer_from` entry points don't exist or misbehave.
+This check confirms the address is _shaped like_ a contract address. It does **not** verify the contract actually implements the token interface, has been initialized, or is a genuine SAC rather than an arbitrary Soroban contract — that failure mode surfaces later, as a panic inside `check_allowance()` or the first `transfer_from()`, when the non-token contract's `allowance`/`transfer_from` entry points don't exist or misbehave.
 
 ---
 
@@ -133,7 +133,7 @@ Deploy one FlowPay contract instance. Subscribers choose their own `token` per `
 **Cons:**
 
 - The admin, `fee_collector`, and every merchant must be prepared to receive and manage balances in however many distinct tokens their subscribers choose. There is no on-chain aggregation across tokens (see [Fee Implications](#fee-implications)).
-- A bug or pause (`pause_contract()`) affects subscribers across *all* tokens simultaneously, since it's one instance.
+- A bug or pause (`pause_contract()`) affects subscribers across _all_ tokens simultaneously, since it's one instance.
 - Per-token analytics (e.g., "total USDC-denominated revenue") must be computed off-chain by filtering `charged` events on the token address emitted in `subscribe`/`subscribed` events, since `merchant_stats.rs` revenue counters are token-agnostic integers.
 
 ### Model B: Separate contract instance per base token
@@ -154,12 +154,12 @@ Deploy multiple FlowPay instances (`soroban contract deploy` once per instance),
 
 ### Choosing between them
 
-| | Model A: single instance | Model B: per-token instances |
-| --- | --- | --- |
-| Contract deployments | 1 | N |
-| Subscriber can mix tokens freely | Yes, per-subscription | No — must pick an instance |
-| Admin/whitelist/grace period scope | Shared across all tokens | Isolated per token |
-| Best for | Consumer apps where users bring their own token | Businesses that want strict per-asset isolation (e.g., regulatory reasons) |
+|                                    | Model A: single instance                        | Model B: per-token instances                                               |
+| ---------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------- |
+| Contract deployments               | 1                                               | N                                                                          |
+| Subscriber can mix tokens freely   | Yes, per-subscription                           | No — must pick an instance                                                 |
+| Admin/whitelist/grace period scope | Shared across all tokens                        | Isolated per token                                                         |
+| Best for                           | Consumer apps where users bring their own token | Businesses that want strict per-asset isolation (e.g., regulatory reasons) |
 
 Nothing prevents combining them: deploy a handful of instances for tokens you want isolated (e.g., a regulated stablecoin), while letting a shared "general" instance accept anything else.
 
@@ -188,17 +188,17 @@ token_client.transfer_from(&env.current_contract_address(), user, &collector, &f
 
 Assume `fee_bps = 250` (2.5%) and `fee_collector = F`.
 
-| Subscriber | `sub.token` | `sub.amount` | Fee transferred to `F` | Net to merchant |
-| --- | --- | --- | --- | --- |
-| Alice | USDC SAC | 100.0000000 USDC | 2.5000000 USDC | 97.5000000 USDC |
-| Bob | XLM SAC | 50.0000000 XLM | 1.2500000 XLM | 48.7500000 XLM |
-| Carol | REWARD SAC | 1000.0000000 REWARD | 25.0000000 REWARD | 975.0000000 REWARD |
+| Subscriber | `sub.token` | `sub.amount`        | Fee transferred to `F` | Net to merchant    |
+| ---------- | ----------- | ------------------- | ---------------------- | ------------------ |
+| Alice      | USDC SAC    | 100.0000000 USDC    | 2.5000000 USDC         | 97.5000000 USDC    |
+| Bob        | XLM SAC     | 50.0000000 XLM      | 1.2500000 XLM          | 48.7500000 XLM     |
+| Carol      | REWARD SAC  | 1000.0000000 REWARD | 25.0000000 REWARD      | 975.0000000 REWARD |
 
 `F` ends up holding balances in three unrelated tokens. **PayFlow never converts, swaps, or nets these against each other** — `get_fee(env) -> Option<(Address, u32)>` returns one collector address and one bps value for the whole contract; it has no per-token override. If you need per-token fee rates or per-token fee collectors, that requires either Deployment Model B (a separate instance, and therefore a separate `propose_fee`/`commit_fee` pair, per token) or a contract change — it is not configurable today.
 
 ### Merchant-level fee recipient override
 
-Independently of the token, a merchant can redirect *their own* net proceeds to a different address via `DataKey::MerchantFeeRecipient(merchant)`:
+Independently of the token, a merchant can redirect _their own_ net proceeds to a different address via `DataKey::MerchantFeeRecipient(merchant)`:
 
 ```rust
 let merchant_dest: Address = env
@@ -226,7 +226,7 @@ let should_increment = existing.as_ref().is_none_or(|s| !s.active);
 Practical implications:
 
 1. **All fields reset, not just `token`.** You must resupply `merchant`, `amount`, `interval`, `trial_period`, and `referrer` (referral is actually preserved separately via `DataKey::Referral`, immutable after first write — see the [lifecycle spec](./spec/lifecycle_spec.md#referral-data) — but `amount`/`interval`/`trial_period` are not carried over from the old record). There's no partial "just update the token" call.
-2. **A new allowance is required.** The subscriber must call `approve()` on the *new* token contract before the new `subscribe()` call, or it fails with `ContractError::InsufficientAllowance`. The allowance previously granted on the *old* token is untouched by this call — it isn't revoked automatically. If you want to stop the contract from being able to pull the old token, the subscriber should separately reduce that allowance to zero on the old token contract.
+2. **A new allowance is required.** The subscriber must call `approve()` on the _new_ token contract before the new `subscribe()` call, or it fails with `ContractError::InsufficientAllowance`. The allowance previously granted on the _old_ token is untouched by this call — it isn't revoked automatically. If you want to stop the contract from being able to pull the old token, the subscriber should separately reduce that allowance to zero on the old token contract.
 3. **Charge history and cancellation state are token-agnostic and persist.** `ChargeHistory(user)` and `SubscriptionMeta(user)` are keyed by user address, not by token, so switching tokens does not reset or fork your charge history — old charges recorded in the old token remain in the same paged history alongside new charges in the new token, with no field distinguishing which token each timestamp was charged in. If you need per-token charge auditing, reconstruct it off-chain from `charged` events (which do include `sub.token` implicitly via the subscription state at charge time) rather than from `get_charge_history_page`.
 4. **`active_count` is not double-counted.** Because the subscriber already had an active subscription, `should_increment` evaluates to `false`, so switching tokens does not inflate `ActiveCount`.
 
@@ -410,7 +410,14 @@ soroban contract invoke \
 ### TypeScript: subscribing with an explicit token
 
 ```typescript
-import { Contract, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
+import {
+  Contract,
+  TransactionBuilder,
+  BASE_FEE,
+  nativeToScVal,
+  Address,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { server, CONTRACT_ID, NETWORK_PASSPHRASE } from "./stellar";
 
 function addressVal(addr: string): xdr.ScVal {
@@ -423,7 +430,7 @@ async function subscribeWithToken(
   merchant: string,
   amountStroops: bigint,
   intervalSeconds: number,
-  tokenAddress: string
+  tokenAddress: string,
 ): Promise<string> {
   const contract = new Contract(CONTRACT_ID);
   const account = await server.getAccount(user);
@@ -441,8 +448,8 @@ async function subscribeWithToken(
         nativeToScVal(intervalSeconds, { type: "u64" }),
         addressVal(tokenAddress), // per-subscription token — see Architecture above
         nativeToScVal(null, { type: "option" }), // trial_period: None
-        nativeToScVal(null, { type: "option" })  // referrer: None
-      )
+        nativeToScVal(null, { type: "option" }), // referrer: None
+      ),
     )
     .setTimeout(30)
     .build();
@@ -460,5 +467,5 @@ async function subscribeWithToken(
 
 - All amounts are in stroops (the smallest unit of whichever token is in use — decimal precision is defined by that token's contract, typically 7 for SAC-wrapped classic assets).
 - The protocol fee, if enabled, is always charged in the same token as the subscription it's deducted from (see [Fee Implications](#fee-implications)).
-- A single user address can hold multiple independent subscriptions to different merchants, each with its own token — the one-subscription-per-user limit is per `(user)` key, so a second `subscribe()` call to a *different* merchant while the first is still active is what [Switching Tokens](#switching-tokens) describes; PayFlow does not key subscriptions by `(user, merchant)`, so there is exactly one active `Subscription` slot per user at a time.
+- A single user address can hold multiple independent subscriptions to different merchants, each with its own token — the one-subscription-per-user limit is per `(user)` key, so a second `subscribe()` call to a _different_ merchant while the first is still active is what [Switching Tokens](#switching-tokens) describes; PayFlow does not key subscriptions by `(user, merchant)`, so there is exactly one active `Subscription` slot per user at a time.
 - The token address must be a valid SAC contract, not a classic Stellar asset issuer/asset-code pair (see [Token address validation](#token-address-validation)).

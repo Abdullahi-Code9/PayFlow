@@ -180,12 +180,12 @@ npm run test
 
 ### Admin subscription repair panel
 
-| Test file | Coverage |
-| --- | --- |
-| `subscriptionValidation.test.ts` | Violation formatting and failure detection |
-| `useAdmin.test.tsx` | Admin wallet authorization |
+| Test file                          | Coverage                                                              |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| `subscriptionValidation.test.ts`   | Violation formatting and failure detection                            |
+| `useAdmin.test.tsx`                | Admin wallet authorization                                            |
 | `SubscriptionRepairPanel.test.tsx` | Validation/repair UI states, event count display, unauthorized repair |
-| `AdminDashboard.test.tsx` | Dashboard integration and read-only guidance |
+| `AdminDashboard.test.tsx`          | Dashboard integration and read-only guidance                          |
 
 ---
 
@@ -276,7 +276,7 @@ The reference keeper implementation in [`docs/KEEPER.md`](KEEPER.md#running-the-
 Before a keeper is allowed to submit real `batch_charge` transactions, test its **read path** in isolation:
 
 - Paging through the subscriber index (`get_subscriber_index_size()` / `get_subscriber_at(offset)`) without calling `batch_charge` at all.
-- Computing which addresses *would* be due for a charge this cycle (comparing `last_charged + interval` against current time) and logging that list instead of submitting it.
+- Computing which addresses _would_ be due for a charge this cycle (comparing `last_charged + interval` against current time) and logging that list instead of submitting it.
 
 This validates pagination and due-date logic against a real deployment without moving any funds — critical to test in isolation because a bug in "who is due" logic (e.g., an off-by-one in interval math) is invisible if you only ever look at `batch_charge`'s aggregate result.
 
@@ -361,10 +361,10 @@ Use a distinct `--seed` per scenario you want to keep independent (e.g., `--seed
 
 ### What runs in CI today
 
-| Workflow | Steps | Covers |
-|---|---|---|
+| Workflow                                          | Steps                                                                | Covers                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`Backend (Rust)`](../.github/workflows/rust.yml) | `cargo clippy -- -D warnings`, `cargo build`, `cargo test --verbose` | All contract unit tests **and** the benchmark tests in `bench.rs` (they're plain `#[test]` functions, so `cargo test` runs them too — see [`docs/development/performance-benchmarking.md`](development/performance-benchmarking.md#ci-integration) for adding a dedicated `--nocapture` reporting step) |
-| [`Frontend`](../.github/workflows/frontend.yml) | `npm ci`, `npm run lint`, `npx prettier --check .`, `npm run build` | Linting, formatting, and a production build — note this workflow does **not** currently run `npm run test` (the Vitest suite) as a separate step; `npm run build` only type-checks and bundles |
+| [`Frontend`](../.github/workflows/frontend.yml)   | `npm ci`, `npm run lint`, `npx prettier --check .`, `npm run build`  | Linting, formatting, and a production build — note this workflow does **not** currently run `npm run test` (the Vitest suite) as a separate step; `npm run build` only type-checks and bundles                                                                                                          |
 
 ### What requires manual testing
 
@@ -379,7 +379,7 @@ Nothing in CI touches a real network — there is no testnet RPC access from Git
 - **A new contract unit or benchmark test**: add it to `contract/src/test.rs` (or `bench.rs`) — it's picked up automatically by the existing `cargo test --verbose` step, no workflow change needed.
 - **A new frontend unit test**: add it under `frontend/src/**/__tests__/` — picked up automatically by Vitest's default discovery, but remember the `Frontend` workflow doesn't currently invoke `npm run test` at all (see table above); if you want frontend unit tests enforced in CI, add a step to [`.github/workflows/frontend.yml`](../.github/workflows/frontend.yml):
   ```yaml
-      - name: Test
-        run: npm run test
+  - name: Test
+    run: npm run test
   ```
 - **A new integration/E2E/keeper check**: these require live testnet access and a funded account, which GitHub Actions doesn't have configured today. Automating any of them means provisioning a CI secret for a funded testnet keypair and accepting real network flakiness in CI — treat this as a deliberate infrastructure decision, not a drop-in workflow step, and discuss it in an issue before implementing it.

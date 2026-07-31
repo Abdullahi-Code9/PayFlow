@@ -16,13 +16,13 @@ The architecture separates responsibilities into:
 
 # Technology Stack
 
-| Technology | Purpose |
-|------------|---------|
-| React | Component based UI |
-| TypeScript | Static typing |
-| Vite | Development server and bundler |
-| Stellar SDK | Building and signing Stellar transactions |
-| Soroban RPC | Smart contract communication |
+| Technology       | Purpose                                   |
+| ---------------- | ----------------------------------------- |
+| React            | Component based UI                        |
+| TypeScript       | Static typing                             |
+| Vite             | Development server and bundler            |
+| Stellar SDK      | Building and signing Stellar transactions |
+| Soroban RPC      | Smart contract communication              |
 | Freighter Wallet | Wallet connection and transaction signing |
 
 ---
