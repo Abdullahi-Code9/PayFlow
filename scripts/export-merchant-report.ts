@@ -12,6 +12,7 @@
 
 import { Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
+import { logger } from "./logger";
 
 const RPC_URL = process.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE = process.env.VITE_NETWORK_PASSPHRASE ?? Networks.TESTNET;
@@ -105,8 +106,10 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
     const userAddress = topic[1]?.toString();
     if (!userAddress) continue;
 
-    const eventTime = event.ledgerClosedAt ? Math.floor(Date.parse(event.ledgerClosedAt) / 1000) : 0;
-    const eventTime = event.ledgerClosedAt ? new Date(event.ledgerClosedAt).getTime() / 1000 : 0;
+    const eventTime = Number(
+      (event as { ledgerCloseTime?: number }).ledgerCloseTime ??
+        (event.ledgerClosedAt ? Date.parse(event.ledgerClosedAt) / 1000 : 0)
+    ) || 0;
 
     if (eventType === "subscribed") {
       const merchantVal = (event as any).value?._value?.merchant;
@@ -233,7 +236,7 @@ async function main() {
   }
 
   if (!["csv", "json", "ndjson"].includes(format)) {
-    console.error(`ERROR: Invalid format '${format}'. Supported formats: csv, json, ndjson`);
+    logger.error(`ERROR: Invalid format '${format}'. Supported formats: csv, json, ndjson`);
     process.exit(1);
   }
 
@@ -242,8 +245,8 @@ async function main() {
     const parsedFields = fieldsStr.split(",").map((f) => f.trim());
     const invalidFields = parsedFields.filter((f) => !VALID_FIELDS.includes(f as ValidField));
     if (invalidFields.length > 0) {
-      console.error(`ERROR: Invalid field(s): ${invalidFields.join(", ")}.`);
-      console.error(`Valid fields are: ${VALID_FIELDS.join(", ")}`);
+      logger.error(`ERROR: Invalid field(s): ${invalidFields.join(", ")}.`);
+      logger.error(`Valid fields are: ${VALID_FIELDS.join(", ")}`);
       process.exit(1);
     }
     selectedFields = parsedFields as ValidField[];
@@ -281,13 +284,13 @@ async function main() {
   if (output) {
     const fs = await import("fs/promises");
     await fs.writeFile(output, formattedOutput, "utf-8");
-    console.log(`Report written to ${output}`);
+    logger.info(`Report written to ${output}`);
   } else {
     process.stdout.write(formattedOutput);
   }
 }
 
 main().catch((err) => {
-  console.error("Export report failed:", err instanceof Error ? err.message : err);
+  logger.error("Export report failed:", err instanceof Error ? err.message : err);
   process.exit(1);
 });

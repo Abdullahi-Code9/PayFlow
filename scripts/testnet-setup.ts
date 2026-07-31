@@ -28,6 +28,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from
 import { join } from "node:path";
 import { Keypair, Contract, Networks, TransactionBuilder, BASE_FEE, nativeToScVal, Address, xdr } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
+import { logger } from "./logger";
 
 const RPC_URL = process.env.RPC_URL || process.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org";
 const FRIENDBOT_URL = process.env.FRIENDBOT_URL || "https://friendbot.stellar.org";
@@ -112,16 +113,16 @@ async function main() {
   const args = process.argv.slice(2);
   const reset = args.includes("--reset");
 
-  console.log(`====================================================`);
-  console.log(`FlowPay Testnet Faucet & Environment Setup`);
-  console.log(`Reset Mode: ${reset ? "YES (--reset)" : "NO"}`);
-  console.log(`RPC Endpoint: ${RPC_URL}`);
-  console.log(`====================================================\n`);
+  logger.info(`====================================================`);
+  logger.info(`FlowPay Testnet Faucet & Environment Setup`);
+  logger.info(`Reset Mode: ${reset ? "YES (--reset)" : "NO"}`);
+  logger.info(`RPC Endpoint: ${RPC_URL}`);
+  logger.info(`====================================================\n`);
 
   mkdirSync(join(process.cwd(), "data"), { recursive: true });
 
   if (reset && existsSync(MANIFEST_PATH)) {
-    console.log(`Backing up existing manifest to: ${BACKUP_MANIFEST_PATH}`);
+    logger.info(`Backing up existing manifest to: ${BACKUP_MANIFEST_PATH}`);
     copyFileSync(MANIFEST_PATH, BACKUP_MANIFEST_PATH);
   }
 
@@ -129,7 +130,7 @@ async function main() {
   if (!reset && existsSync(MANIFEST_PATH)) {
     try {
       manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8"));
-      console.log(`Loaded existing testnet manifest from ${MANIFEST_PATH}`);
+      logger.info(`Loaded existing testnet manifest from ${MANIFEST_PATH}`);
     } catch {
       manifest = null;
     }
@@ -168,44 +169,44 @@ async function main() {
   const server = new Server(RPC_URL);
 
   // 1. Fund Accounts via Friendbot
-  console.log(`Step 1: Funding test accounts via Friendbot...`);
+  logger.info(`Step 1: Funding test accounts via Friendbot...`);
 
   const allAccounts = [manifest.admin, manifest.merchant, ...manifest.subscribers];
   for (const acc of allAccounts) {
     const funded = await isAccountFunded(server, acc.publicKey);
     if (funded) {
-      console.log(`  [OK] ${acc.name} (${acc.publicKey}) is already funded.`);
+      logger.info(`  [OK] ${acc.name} (${acc.publicKey}) is already funded.`);
     } else {
-      console.log(`  [FUNDING] ${acc.name} (${acc.publicKey})...`);
+      logger.info(`  [FUNDING] ${acc.name} (${acc.publicKey})...`);
       await fundViaFriendbot(acc.publicKey);
-      console.log(`  [OK] ${acc.name} funded.`);
+      logger.info(`  [OK] ${acc.name} funded.`);
     }
   }
 
   // 2. Setup Contract Environment Details
-  console.log(`\nStep 2: Configuring contract and subscriptions...`);
-  console.log(`  Contract ID: ${manifest.contractId}`);
-  console.log(`  Token SAC: ${manifest.tokenAddress}`);
-  console.log(`  Admin Address: ${manifest.admin.publicKey}`);
-  console.log(`  Merchant Address: ${manifest.merchant.publicKey}`);
+  logger.info(`\nStep 2: Configuring contract and subscriptions...`);
+  logger.info(`  Contract ID: ${manifest.contractId}`);
+  logger.info(`  Token SAC: ${manifest.tokenAddress}`);
+  logger.info(`  Admin Address: ${manifest.admin.publicKey}`);
+  logger.info(`  Merchant Address: ${manifest.merchant.publicKey}`);
 
-  console.log(`\nStep 3: Creating 5 test subscriptions...`);
+  logger.info(`\nStep 3: Creating 5 test subscriptions...`);
   for (const sub of manifest.subscribers) {
     const details = sub.subscription!;
-    console.log(`  Subscribed ${sub.name} (${sub.publicKey}) -> Merchant (${manifest.merchant.publicKey})`);
-    console.log(`    Amount: ${details.amountXlm} XLM (${details.amountStroops} stroops), Interval: ${details.intervalSeconds}s`);
+    logger.info(`  Subscribed ${sub.name} (${sub.publicKey}) -> Merchant (${manifest.merchant.publicKey})`);
+    logger.info(`    Amount: ${details.amountXlm} XLM (${details.amountStroops} stroops), Interval: ${details.intervalSeconds}s`);
   }
 
   manifest.updatedAt = new Date().toISOString();
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2), "utf-8");
 
-  console.log(`\n====================================================`);
-  console.log(`Testnet setup complete!`);
-  console.log(`Manifest written to: ${MANIFEST_PATH}`);
-  console.log(`====================================================`);
+  logger.info(`\n====================================================`);
+  logger.info(`Testnet setup complete!`);
+  logger.info(`Manifest written to: ${MANIFEST_PATH}`);
+  logger.info(`====================================================`);
 }
 
 main().catch((err) => {
-  console.error("Testnet setup failed:", err instanceof Error ? err.message : err);
+  logger.error("Testnet setup failed:", err instanceof Error ? err.message : err);
   process.exit(1);
 });

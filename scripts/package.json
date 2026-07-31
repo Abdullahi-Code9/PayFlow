@@ -8,6 +8,8 @@
     "check-allowances": "tsx check-allowances.ts",
     "keeper": "tsx keeper.ts",
     "pre-upgrade-check": "tsx pre-upgrade-check.ts",
+    "batch-optimizer": "tsx batch-optimizer.ts",
+    "keeper": "tsx keeper.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
