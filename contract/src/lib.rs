@@ -843,6 +843,21 @@ impl FlowPay {
         upgrade::commit_upgrade(&env);
     }
 
+    /// Returns the pending WASM hash queued for the two-step upgrade flow,
+    /// or `None` if no upgrade has been proposed.
+    ///
+    /// # Auth
+    ///
+    /// None required — view-only read.
+    ///
+    /// # Storage
+    ///
+    /// Reads `DataKey::PendingUpgrade` from temporary storage (TTL ~24 h).
+    /// Returns `None` when the key has expired or was never set.
+    pub fn get_pending_upgrade(env: Env) -> Option<BytesN<32>> {
+        upgrade::get_pending_upgrade(&env)
+    }
+
     pub fn clear_fee(env: Env) {
         admin::require_admin(&env);
         fee::clear_fee(&env);
