@@ -8,6 +8,9 @@
     "check-allowances": "tsx check-allowances.ts",
     "alert-expiring-allowances": "tsx alert-expiring-allowances.ts",
     "indexer": "tsx indexer.ts",
+    "query-events": "tsx query-events.ts",
+    "keeper": "tsx keeper.ts",
+    "build": "tsc -p tsconfig.build.json",
     "query-events": "tsx query-events.ts"
     "batch-optimizer": "tsx batch-optimizer.ts",
     "keeper": "tsx keeper.ts",
