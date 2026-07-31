@@ -6,6 +6,7 @@
   "scripts": {
     "watch-events": "tsx watch-events.ts",
     "check-allowances": "tsx check-allowances.ts",
+    "batch-optimizer": "tsx batch-optimizer.ts",
     "keeper": "tsx keeper.ts",
     "typecheck": "tsc --noEmit"
   },

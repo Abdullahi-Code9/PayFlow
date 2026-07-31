@@ -58,7 +58,8 @@ async function simulateCall(server: MultiEndpointServer, fnName: string): Promis
   const contract = new Contract(CONTRACT_ID);
   const account = await server.getAccount(SIMULATION_SOURCE).catch(async () => {
     // For simulation-only calls, build a synthetic account if lookup fails.
-    return new (await import("@stellar/stellar-sdk")).Account(SIMULATION_SOURCE, "0");
+    const { Account } = await import("@stellar/stellar-sdk");
+    return new Account(SIMULATION_SOURCE, "0");
   });
 
   const tx = new TransactionBuilder(account, {

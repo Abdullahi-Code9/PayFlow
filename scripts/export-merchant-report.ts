@@ -106,8 +106,10 @@ async function getMerchantSubscriberCount(server: Server, merchant: string): Pro
     const userAddress = topic[1]?.toString();
     if (!userAddress) continue;
 
-    const eventTime = event.ledgerClosedAt ? Math.floor(Date.parse(event.ledgerClosedAt) / 1000) : 0;
-    const eventTime = event.ledgerClosedAt ? new Date(event.ledgerClosedAt).getTime() / 1000 : 0;
+    const eventTime = Number(
+      (event as { ledgerCloseTime?: number }).ledgerCloseTime ??
+        (event.ledgerClosedAt ? Date.parse(event.ledgerClosedAt) / 1000 : 0)
+    ) || 0;
 
     if (eventType === "subscribed") {
       const merchantVal = (event as any).value?._value?.merchant;
