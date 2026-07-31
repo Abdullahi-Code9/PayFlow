@@ -7,18 +7,24 @@
  */
 
 import { Server } from "@stellar/stellar-sdk/rpc";
+import { EventDedupCache, createCacheKey } from "./event-dedup.js";
+import { MultiEndpointServer } from "./rpc-client.js";
+import { logger } from "./logger";
 
 // ── Configuration ────────────────────────────────────────────────────────────────
 
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const POLL_INTERVAL_MS = 3000;
+const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG?.includes("payflow");
 
 if (!CONTRACT_ID) {
   console.error("Error: CONTRACT_ID environment variable is required");
   console.error(
     "Usage: CONTRACT_ID=your_contract_id RPC_URL=https://... tsx watch-events.ts",
   );
+  logger.error("Error: CONTRACT_ID environment variable is required");
+  logger.error("Usage: CONTRACT_ID=your_contract_id RPC_URL=https://... tsx watch-events.ts");
   process.exit(1);
 }
 
@@ -186,6 +192,8 @@ function printEvent(event: ParsedEvent): void {
   const amount = event.amount ? `${stroopsToXlm(event.amount)} XLM` : "N/A";
 
   console.log(
+  
+  logger.info(
     `${colors.dim}${timestamp}${colors.reset} ` +
       `${color}${colors.bright}${event.type}${colors.reset} ` +
       `${colors.dim}|${colors.reset} ` +
@@ -201,9 +209,21 @@ function printEvent(event: ParsedEvent): void {
 
 // ── Main Polling Loop ───────────────────────────────────────────────────────────
 
+/**
+ * Log a debug message when DEBUG env is set.
+ */
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    logger.error(colors.dim + "[DEBUG]" + colors.reset, ...args);
+  }
+}
+
 const server = new Server(RPC_URL);
+const dedupCache = new EventDedupCache();
+const server = new MultiEndpointServer(RPC_URL);
 const seenEvents = new Set<string>();
 let currentLedger = 0;
+let totalEventsSeen = 0;
 
 async function fetchAndPrintEvents(): Promise<void> {
   try {
@@ -230,10 +250,29 @@ async function fetchAndPrintEvents(): Promise<void> {
 
       if (!seenEvents.has(parsed.id)) {
         seenEvents.add(parsed.id);
+      
+      // Deduplication check
+      if (!dedupCache.checkAndRecord(parsed.txHash, parsed.type, parsed.ledger)) {
         newEvents.push(parsed);
+      } else {
+        debugLog(`Duplicate event skipped: ${createCacheKey(parsed.txHash, parsed.type, parsed.ledger)}`);
       }
     }
 
+    
+    // Periodic stats logging (every 100 events processed)
+    totalEventsSeen += response.events.length;
+    if (totalEventsSeen >= 100) {
+      const s = dedupCache.stats;
+      logger.error(
+        colors.dim + `[DEDUP] ${s.deduplicatedTotal} duplicates skipped, ` +
+        `${s.totalProcessed} unique processed, ` +
+        `${s.size}/${s.maxSize} cache entries, ` +
+        `${s.evictions} evictions` + colors.reset
+      );
+      totalEventsSeen = 0;
+    }
+    
     // Sort by timestamp and print new events
     newEvents.sort((a, b) => a.timestamp - b.timestamp);
     for (const event of newEvents) {
@@ -251,6 +290,11 @@ async function fetchAndPrintEvents(): Promise<void> {
     console.error(
       colors.red + `Error fetching events: ${errorMsg}` + colors.reset,
     );
+      logger.info(colors.dim + `─ ${newEvents.length} new event(s) ─` + colors.reset);
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
+    logger.error(colors.red + `Error fetching events: ${errorMsg}` + colors.reset);
   }
 }
 
@@ -263,6 +307,13 @@ async function main(): Promise<void> {
   );
   console.log("");
 
+  logger.info(colors.bright + "FlowPay Event Watcher" + colors.reset);
+  logger.info(colors.dim + `RPC: ${RPC_URL}` + colors.reset);
+  logger.info(colors.dim + `Contract: ${CONTRACT_ID}` + colors.reset);
+  logger.info(colors.dim + `Polling every ${POLL_INTERVAL_MS}ms...` + colors.reset);
+  logger.info(colors.dim + `Dedup cache: ${dedupCache.stats.maxSize} entries` + (dedupCache.stats.maxSize > 0 ? `, TTL: ${process.env.EVENT_DEDUP_TTL_MS || "none"}` : "") + colors.reset);
+  logger.info("");
+  
   // Initial fetch
   await fetchAndPrintEvents();
 
@@ -276,15 +327,15 @@ async function main(): Promise<void> {
 // ── Error Handling ───────────────────────────────────────────────────────────────
 
 process.on("uncaughtException", (error) => {
-  console.error(colors.red + `Uncaught exception: ${error}` + colors.reset);
+  logger.error(colors.red + `Uncaught exception: ${error}` + colors.reset);
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error(colors.red + `Unhandled rejection: ${reason}` + colors.reset);
+  logger.error(colors.red + `Unhandled rejection: ${reason}` + colors.reset);
 });
 
 // Start the watcher
 main().catch((error) => {
-  console.error(colors.red + `Fatal error: ${error}` + colors.reset);
+  logger.error(colors.red + `Fatal error: ${error}` + colors.reset);
   process.exit(1);
 });

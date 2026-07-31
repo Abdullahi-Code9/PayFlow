@@ -81,6 +81,7 @@
     ],
     [],
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
@@ -381,7 +382,19 @@
                           ]
                         },
                         "val": {
-                          "u32": 2
+                          "u32": 3
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistEnabled"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
                         }
                       }
                     ]
@@ -1124,7 +1137,7 @@
             "data": {
               "vec": [
                 {
-                  "u32": 2
+                  "u32": 3
                 },
                 {
                   "u32": 1

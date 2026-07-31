@@ -54,7 +54,37 @@ pub fn append_subscriber_index(env: &Env, user: &Address) {
     env.storage()
         .persistent()
         .extend_ttl(&key, SUBSCRIPTION_TTL_LEDGERS, SUBSCRIPTION_TTL_LEDGERS);
+
+    let slot_key = DataKey::SubscriberIndexSlot(user.clone());
+    env.storage().persistent().set(&slot_key, &slot);
+    env.storage().persistent().extend_ttl(
+        &slot_key,
+        SUBSCRIPTION_TTL_LEDGERS,
+        SUBSCRIPTION_TTL_LEDGERS,
+    );
+
     env.storage()
         .persistent()
         .set(&DataKey::SubscriberIndexSize, &(slot + 1));
+}
+
+/// Marks `user`'s slot in the subscriber index as removed (tombstoned) so
+/// keepers can skip it on future cycles. Safe to call for entries that
+/// predate this feature and have no recorded slot (no-op in that case).
+pub fn remove_subscriber_index(env: &Env, user: &Address) {
+    let slot_key = DataKey::SubscriberIndexSlot(user.clone());
+    if let Some(slot) = env.storage().persistent().get::<DataKey, u64>(&slot_key) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::SubscriberIndexRemoved(slot), &true);
+        env.storage().persistent().remove(&slot_key);
+    }
+}
+
+/// Returns whether the subscriber index slot at `index` has been pruned.
+pub fn is_subscriber_index_removed(env: &Env, index: u64) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SubscriberIndexRemoved(index))
+        .unwrap_or(false)
 }

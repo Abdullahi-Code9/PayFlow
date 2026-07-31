@@ -24,15 +24,16 @@ import {
   Address,
   xdr,
 } from "@stellar/stellar-sdk";
-import { Server } from "@stellar/stellar-sdk/rpc";
+import { MultiEndpointServer } from "./rpc-client.js";
 import { readFileSync, writeFileSync } from "node:fs";
+import { logger } from "./logger";
 
 const CONTRACT_ID = process.env.CONTRACT_ID ?? "";
 const RPC_URL = process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE ?? Networks.TESTNET;
 const SIM_SOURCE = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
 
-const server = new Server(RPC_URL);
+const server = new MultiEndpointServer(RPC_URL);
 
 async function simulate(
   method: string,
@@ -138,6 +139,10 @@ async function main() {
     console.error("No addresses provided");
     process.exit(1);
   }
+  if (!CONTRACT_ID) { logger.error("CONTRACT_ID required"); process.exit(1); }
+
+  const addresses = readAddresses();
+  if (addresses.length === 0) { logger.error("No addresses provided"); process.exit(1); }
 
   const subscriptions: SubscriptionEntry[] = [];
   for (const addr of addresses) {
@@ -161,7 +166,7 @@ async function main() {
   const outIdx = process.argv.indexOf("--out");
   if (outIdx !== -1) {
     writeFileSync(process.argv[outIdx + 1], JSON.stringify(snapshot, null, 2));
-    console.log(`Wrote snapshot to ${process.argv[outIdx + 1]}`);
+    logger.info(`Wrote snapshot to ${process.argv[outIdx + 1]}`);
   } else {
     process.stdout.write(JSON.stringify(snapshot, null, 2) + "\n");
   }
@@ -171,3 +176,4 @@ main().catch((e) => {
   console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 });
+main().catch((e) => { logger.error(e instanceof Error ? e.message : e); process.exit(1); });
