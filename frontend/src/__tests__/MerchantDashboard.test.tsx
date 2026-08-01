@@ -36,8 +36,11 @@ import MerchantDashboard from "../components/MerchantDashboard";
 
 const NOW = Math.floor(Date.now() / 1000);
 
+// Checksum-valid Stellar public key (StrKey.isValidEd25519PublicKey)
+const VALID_ADDR_1 = "GCOEYT3WI3LY34I7DN7BR7AF33TNF2YF4OYTLVPJKMYAWT2RWEF5BUDK";
+
 const SAMPLE_SUBSCRIBER = {
-  subscriber: "GTESTER000000000000000000000000000000000000000000",
+  subscriber: VALID_ADDR_1,
   amount: "10000000",
   interval: 2592000,
   lastCharged: NOW - 2592000,
@@ -64,7 +67,7 @@ describe("MerchantDashboard", () => {
     await waitFor(() => expect(screen.getByText(/Merchant Dashboard/)).toBeTruthy());
 
     // Table renders truncated address via formatAddress default (6, 4)
-    expect(screen.getByText("GTESTE…0000")).toBeTruthy();
+    expect(screen.getByText("GCOEYT…BUDK")).toBeTruthy();
     // Amount column shows XLM value
     expect(screen.getByText("10.0000000 XLM")).toBeTruthy(); // Total Revenue
     expect(screen.getByText("1.0000000 XLM")).toBeTruthy();
