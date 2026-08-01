@@ -6,7 +6,6 @@ import SubscriptionCardSkeleton from "./Skeleton";
 import ErrorBoundary from "./ErrorBoundary";
 import ErrorRecovery from "./ErrorRecovery";
 
-
 // Lazy-load SubscriptionHistory so it is excluded from the main chunk (Issue #445).
 const SubscriptionHistory = lazy(() => import("./SubscriptionHistory"));
 import PayPerUseForm from "./PayPerUseForm";
@@ -205,8 +204,12 @@ export default function Dashboard({
                 </div>
               )}
 
-              <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} />
-              <PayPerUseForm ref={ppuInputRef} onPay={handlePayPerUse} loading={ppuPending} isPaused={isPaused} />
+              <PayPerUseForm
+                ref={ppuInputRef}
+                onPay={handlePayPerUse}
+                loading={ppuPending}
+                isPaused={isPaused}
+              />
               {ppuPending && (
                 <p className="status-text status-text--pending">Confirming payment…</p>
               )}
@@ -219,7 +222,6 @@ export default function Dashboard({
               <ReferralPanel publicKey={userKey} />
             </>
           )}
-
         </>
       )}
 

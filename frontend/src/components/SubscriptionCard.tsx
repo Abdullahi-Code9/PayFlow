@@ -29,6 +29,7 @@ import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 import { useResponsive } from "../hooks/useResponsive";
 import { useAmountDisplay } from "../hooks/useAmountDisplay";
+import { useToast } from "../hooks/useToast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,10 +66,7 @@ function formatTrialStatus(
   const now = Math.floor(Date.now() / 1000);
   const isInTrial = now < trialEndTimestamp;
   const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
-  const trialDaysRemaining = Math.max(
-    0,
-    Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60))
-  );
+  const trialDaysRemaining = Math.max(0, Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60)));
 
   return { isInTrial, trialEndDate, trialDaysRemaining };
 }
@@ -77,10 +75,7 @@ function formatTrialStatus(
  * Compute the allowance health tier given the raw allowance and subscription
  * amount (both in stroops).
  */
-export function computeAllowanceHealth(
-  allowance: bigint | null,
-  amount: bigint
-): AllowanceHealth {
+export function computeAllowanceHealth(allowance: bigint | null, amount: bigint): AllowanceHealth {
   if (allowance === null) return "unknown";
   if (allowance === 0n) return "none";
   if (allowance < amount) return "low";
@@ -126,15 +121,15 @@ function AllowanceHealthBadge({ health, loading, onClick }: AllowanceHealthBadge
     health === "none"
       ? "No allowance — charges will fail"
       : health === "low"
-      ? "Allowance too low"
-      : "Allowance unknown";
+        ? "Allowance too low"
+        : "Allowance unknown";
 
   const className =
     health === "none"
       ? "allowance-health-badge allowance-health-badge--none"
       : health === "low"
-      ? "allowance-health-badge allowance-health-badge--low"
-      : "allowance-health-badge allowance-health-badge--unknown";
+        ? "allowance-health-badge allowance-health-badge--low"
+        : "allowance-health-badge allowance-health-badge--unknown";
 
   return (
     <button
@@ -146,8 +141,8 @@ function AllowanceHealthBadge({ health, loading, onClick }: AllowanceHealthBadge
       {health === "none"
         ? "⚠ No allowance — charges will fail"
         : health === "low"
-        ? "⚠ Allowance too low"
-        : "? Allowance unknown"}
+          ? "⚠ Allowance too low"
+          : "? Allowance unknown"}
     </button>
   );
 }
@@ -220,6 +215,7 @@ export default function SubscriptionCard({
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
   const { displayCurrentAmount } = useAmountDisplay();
+  const { addToast } = useToast();
   const nextChargeTimestamp = last_charged + interval;
   const formattedAmount = displayCurrentAmount(amount);
 
@@ -299,7 +295,9 @@ export default function SubscriptionCard({
       setShowCancelConfirm(false);
       onCancelled?.();
     } catch (e: unknown) {
-      setCancelStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      setCancelStatus(msg);
+      addToast(msg, "error");
     } finally {
       setCancelLoading(false);
     }
@@ -399,10 +397,7 @@ export default function SubscriptionCard({
       <div className="subscription-card__actions">
         {active && !paused && (
           <>
-            <button
-              onClick={() => setShowPauseConfirm(true)}
-              className="btn-secondary pause-btn"
-            >
+            <button onClick={() => setShowPauseConfirm(true)} className="btn-secondary pause-btn">
               Pause
             </button>
             <button
@@ -512,7 +507,11 @@ export default function SubscriptionCard({
       )}
 
       {(derivedPauseStatus.startsWith("Error") || cancelStatus.startsWith("Error")) && (
-        <ErrorRecovery error={derivedPauseStatus.startsWith("Error") ? pauseTx.error || resumeTx.error : cancelStatus} />
+        <ErrorRecovery
+          error={
+            derivedPauseStatus.startsWith("Error") ? pauseTx.error || resumeTx.error : cancelStatus
+          }
+        />
       )}
     </div>
   );

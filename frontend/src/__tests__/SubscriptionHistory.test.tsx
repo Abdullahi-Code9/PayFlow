@@ -14,12 +14,7 @@ const mockedUseContractEvents = vi.mocked(useContractEvents);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeEvent(opts: {
-  txHash: string;
-  merchant?: string;
-  amount: bigint;
-  chargedAt: number;
-}) {
+function makeEvent(opts: { txHash: string; merchant?: string; amount: bigint; chargedAt: number }) {
   return {
     eventName: "charged",
     address: "GABC123",
@@ -44,7 +39,7 @@ const TS_JAN20 = 1705752000;
 const TS_JAN25 = 1706184000;
 
 const MOCK_EVENTS = [
-  makeEvent({ txHash: "tx_jan15", amount: 5_000_000n, chargedAt: TS_JAN15 }),  // 0.50 XLM
+  makeEvent({ txHash: "tx_jan15", amount: 5_000_000n, chargedAt: TS_JAN15 }), // 0.50 XLM
   makeEvent({ txHash: "tx_jan20", amount: 10_000_000n, chargedAt: TS_JAN20 }), // 1.00 XLM
   makeEvent({ txHash: "tx_jan25", amount: 20_000_000n, chargedAt: TS_JAN25 }), // 2.00 XLM
 ];
@@ -79,9 +74,7 @@ describe("SubscriptionHistory", () => {
       hasMore: false,
     });
     render(<SubscriptionHistory userKey="GABC123" />);
-    expect(screen.getByLabelText(/loading charge history/i)).toBeInTheDocument();
-
-    expect(screen.getAllByLabelText(/loading charge history/i)[0]).toBeInTheDocument();
+    expect(screen.getByText(/loading charge history/i)).toBeInTheDocument();
   });
 
   it("renders charge events when data is loaded", () => {
@@ -287,9 +280,7 @@ describe("SubscriptionHistory", () => {
       target: { value: "2024-01-22" },
     });
 
-    expect(screen.getByTestId("filter-results-count")).toHaveTextContent(
-      "Showing 1 of 3 charges"
-    );
+    expect(screen.getByTestId("filter-results-count")).toHaveTextContent("Showing 1 of 3 charges");
   });
 
   it("does not show results count when no filters are active", () => {

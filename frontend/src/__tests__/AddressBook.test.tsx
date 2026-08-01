@@ -433,7 +433,7 @@ describe("SubscribeForm address book integration", () => {
     await user.click(screen.getByRole("button", { name: /select alice/i }));
 
     // The merchant input should now contain the selected address
-    const merchantInput = screen.getByPlaceholderText(/^G…$/);
+    const merchantInput = screen.getByTestId("merchant-input");
     expect(merchantInput).toHaveValue(VALID_ADDRESS_1);
   });
 

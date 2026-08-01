@@ -102,9 +102,7 @@ function EventRow({ event }: EventRowProps) {
             {shortHash(event.txHash)}↗
           </a>
         )}
-        <span className="event-feed__ledger text-xs text-subtle">
-          Ledger {event.ledger}
-        </span>
+        <span className="event-feed__ledger text-xs text-subtle">Ledger {event.ledger}</span>
       </div>
     </div>
   );
@@ -169,7 +167,11 @@ export default function EventFeed({
       </div>
 
       {error && (
-        <p className="event-feed__error text-sm" style={{ color: "var(--color-danger)" }} role="alert">
+        <p
+          className="event-feed__error text-sm"
+          style={{ color: "var(--color-danger)" }}
+          role="alert"
+        >
           {error}
         </p>
       )}

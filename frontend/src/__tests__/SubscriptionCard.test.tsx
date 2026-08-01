@@ -389,9 +389,7 @@ describe("SubscriptionCard", () => {
       await waitFor(() => {
         expect(screen.getByTestId("allowance-badge-unknown")).toBeInTheDocument();
       });
-      expect(screen.getByTestId("allowance-badge-unknown")).toHaveTextContent(
-        "Allowance unknown"
-      );
+      expect(screen.getByTestId("allowance-badge-unknown")).toHaveTextContent("Allowance unknown");
     });
 
     it("opens IncreaseAllowanceModal when warning badge is clicked", async () => {
@@ -438,9 +436,7 @@ describe("SubscriptionCard", () => {
         />
       );
 
-      await waitFor(() =>
-        expect(screen.getByTestId("allowance-badge-none")).toBeInTheDocument()
-      );
+      await waitFor(() => expect(screen.getByTestId("allowance-badge-none")).toBeInTheDocument());
 
       expect(screen.getByTestId("allowance-badge-none")).toHaveAttribute(
         "aria-label",
@@ -527,9 +523,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(
-        screen.getByRole("button", { name: /cancel subscription/i })
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /cancel subscription/i })).toBeInTheDocument();
     });
 
     it("calls onCancel when cancel button is clicked", async () => {
@@ -541,9 +535,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      await userEvent.click(
-        screen.getByRole("button", { name: /cancel subscription/i })
-      );
+      await userEvent.click(screen.getByRole("button", { name: /cancel subscription/i }));
       // Clicking cancel opens the confirm dialog
       expect(screen.getByText(/Cancel subscription\?/i)).toBeInTheDocument();
       void mockOnCancel; // used for backwards-compat reference
@@ -558,9 +550,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(
-        screen.queryAllByRole("button", { name: /cancel subscription/i })
-      ).toHaveLength(0);
+      expect(screen.queryAllByRole("button", { name: /cancel subscription/i })).toHaveLength(0);
     });
   });
 
@@ -608,9 +598,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(screen.getByTestId("next-charge")).toHaveTextContent(
-        String(lastCharged + interval)
-      );
+      expect(screen.getByTestId("next-charge")).toHaveTextContent(String(lastCharged + interval));
     });
 
     it("shows dash when subscription is inactive", () => {
@@ -675,9 +663,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(
-        screen.getByRole("button", { name: /cancel subscription/i })
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /cancel subscription/i })).toBeInTheDocument();
     });
 
     it("does not render cancel button when subscription is inactive", () => {
@@ -689,9 +675,7 @@ describe("SubscriptionCard", () => {
           onRefresh={mockOnRefresh}
         />
       );
-      expect(
-        screen.queryAllByRole("button", { name: /cancel subscription/i })
-      ).toHaveLength(0);
+      expect(screen.queryAllByRole("button", { name: /cancel subscription/i })).toHaveLength(0);
     });
   });
 });

@@ -2,7 +2,6 @@ import React, { useMemo, useRef, useState } from "react";
 import { useContractEvents } from "../hooks/useContractEvents";
 import { ChargeEvent } from "../types";
 import { STROOPS_PER_XLM } from "../constants";
-import { useAmountDisplay } from "../hooks/useAmountDisplay";
 import Spinner from "./Spinner";
 import CopyButton from "./CopyButton";
 import { ChargeHistorySkeleton } from "./Skeleton";
@@ -132,7 +131,6 @@ export default function SubscriptionHistory({ userKey }: Props) {
     loadMore,
     hasMore,
   } = useContractEvents("charged", userKey);
-  const { displayCurrentAmount } = useAmountDisplay();
 
   // Cache of the last successfully fetched events for stale-while-revalidate.
   const cachedEventsRef = useRef<ChargeEvent[]>([]);
@@ -217,8 +215,11 @@ export default function SubscriptionHistory({ userKey }: Props) {
 
   if (!hasData && loading) {
     return (
-      <div className="card" aria-busy="true" aria-label="Loading charge history">
-        <h3 className="subscription-card__title" style={{ marginBottom: "var(--space-4)" }}>Charge History</h3>
+      <div className="card" aria-busy="true">
+        <h3 className="subscription-card__title" style={{ marginBottom: "var(--space-4)" }}>
+          Charge History
+        </h3>
+        <p className="sr-only">Loading charge history</p>
         <div className="charge-history-list" role="list">
           <ChargeHistorySkeleton />
           <ChargeHistorySkeleton />
@@ -489,7 +490,7 @@ export default function SubscriptionHistory({ userKey }: Props) {
               >
                 <span className="subscription-row__value">{formatDate(event.date)}</span>
                 <span className="subscription-row__value" style={{ fontWeight: 600 }}>
-                  {formatAmount(event.amount)}
+                  {`${(Number(event.amount) / STROOPS_PER_XLM).toFixed(2)} XLM`}
                 </span>
               </div>
               <div
@@ -515,33 +516,6 @@ export default function SubscriptionHistory({ userKey }: Props) {
                   </a>
                   <CopyButton text={event.txHash} />
                 </div>
-              <span className="subscription-row__value">{formatDate(event.date)}</span>
-              <span className="subscription-row__value" style={{ fontWeight: 600 }}>
-                {displayCurrentAmount(event.amount)}
-              </span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <span className="merchant-row__address" style={{ fontSize: "0.875rem" }}>
-                To: {truncateHash(event.merchant)}
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
-                <a
-                  href={`https://stellar.expert/explorer/testnet/tx/${event.txHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="merchant-row__address"
-                  style={{ fontSize: "0.875rem" }}
-                  title={event.txHash}
-                >
-                  {truncateHash(event.txHash)}
-                </a>
-                <CopyButton text={event.txHash} />
               </div>
             </div>
           ))}

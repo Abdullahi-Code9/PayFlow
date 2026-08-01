@@ -546,9 +546,12 @@ describe("SubscribeForm component — inline validation on blur", () => {
     await userEvent.type(merchantInput, VALID_MERCHANT);
     await userEvent.type(amountInput, "5");
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /subscribe/i })).not.toBeDisabled();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(screen.getByRole("button", { name: /subscribe/i })).not.toBeDisabled();
+      },
+      { timeout: 3000 }
+    );
   });
 
   it("submit marks all fields as touched — merchant error shown when merchant is empty", async () => {
@@ -602,9 +605,12 @@ describe("SubscribeForm component — inline validation on blur", () => {
     await userEvent.type(merchantInput, VALID_MERCHANT);
     await userEvent.type(amountInput, "5");
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /subscribe/i })).not.toBeDisabled();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(screen.getByRole("button", { name: /subscribe/i })).not.toBeDisabled();
+      },
+      { timeout: 3000 }
+    );
 
     await userEvent.click(screen.getByRole("button", { name: /subscribe/i }));
 

@@ -80,25 +80,19 @@ export function enqueue(operation: string, retry: (() => Promise<void>) | null =
 
 /** Mark an entry as submitted (hash now known, waiting for confirmation). */
 export function markSubmitted(id: number, hash: string): void {
-  entries = entries.map((e) =>
-    e.id === id ? { ...e, hash, status: "submitted" } : e
-  );
+  entries = entries.map((e) => (e.id === id ? { ...e, hash, status: "submitted" } : e));
   notify();
 }
 
 /** Mark an entry as confirmed on-chain. */
 export function markConfirmed(id: number): void {
-  entries = entries.map((e) =>
-    e.id === id ? { ...e, status: "confirmed" } : e
-  );
+  entries = entries.map((e) => (e.id === id ? { ...e, status: "confirmed" } : e));
   notify();
 }
 
 /** Mark an entry as failed with an error message. */
 export function markFailed(id: number, error: string): void {
-  entries = entries.map((e) =>
-    e.id === id ? { ...e, status: "failed", error } : e
-  );
+  entries = entries.map((e) => (e.id === id ? { ...e, status: "failed", error } : e));
   notify();
 }
 

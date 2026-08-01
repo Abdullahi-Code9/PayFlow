@@ -451,7 +451,6 @@ export function getSubscriptionHealth(user: string): Promise<SubscriptionHealth 
   });
 }
 
-
 function parseEventValueField(value: any, field: string): string {
   if (!value) return "";
   const base = value._value?.[field] ?? value[field];
@@ -1167,11 +1166,7 @@ const ARCHIVED_ERROR_PATTERNS = [
  */
 export function isArchivedError(err: unknown): boolean {
   const msg =
-    err instanceof Error
-      ? err.message
-      : typeof err === "string"
-        ? err
-        : JSON.stringify(err ?? "");
+    err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err ?? "");
 
   return ARCHIVED_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
 }

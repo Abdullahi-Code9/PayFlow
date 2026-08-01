@@ -74,9 +74,7 @@ export default function ThemeToggle({ className }: ThemeToggleProps) {
       type="button"
     >
       {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-      <span className="theme-toggle__label">
-        {theme === "dark" ? "Light" : "Dark"}
-      </span>
+      <span className="theme-toggle__label">{theme === "dark" ? "Light" : "Dark"}</span>
     </button>
   );
 }
