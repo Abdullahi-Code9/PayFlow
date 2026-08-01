@@ -42,7 +42,7 @@ vi.mock("../stellar", () => ({
 // Mock hooks used by SubscriptionCard
 vi.mock("../hooks/useSubscriptionSync", () => ({
   useSubscriptionSync: () => ({
-    mutate: vi.fn((_op: string, fn: () => Promise<string>, _opt: object) => fn()),
+    mutate: vi.fn((_op: string, fn: () => Promise<string>) => fn()),
   }),
 }));
 

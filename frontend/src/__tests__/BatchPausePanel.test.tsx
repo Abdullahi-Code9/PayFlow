@@ -27,7 +27,6 @@ import BatchPausePanel from "../components/admin/BatchPausePanel";
 // Generated via Keypair.random() — checksum-valid for StrKey.isValidEd25519PublicKey
 const VALID_ADDR_1 = "GCOEYT3WI3LY34I7DN7BR7AF33TNF2YF4OYTLVPJKMYAWT2RWEF5BUDK";
 const VALID_ADDR_2 = "GAEVL5Q7VI7A72TZLBHCNYEFGLC7GDQVOX4KKER67U6EUPR3LCZ3NULB";
-const VALID_ADDR_3 = "GDSG7FQANGG6BP2QNVPKOBHDTKHTOBKRWK2LD6Z7OLZ4GXQXZDXE6AEL";
 
 describe("BatchPausePanel", () => {
   const defaultProps = {

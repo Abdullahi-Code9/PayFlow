@@ -108,17 +108,6 @@ function EventRow({ event }: EventRowProps) {
   );
 }
 
-const EVENT_NAMES = [
-  "subscribed",
-  "charged",
-  "cancelled",
-  "paused",
-  "resumed",
-  "pay_per_use",
-  "upgrade",
-  "upgrade_proposed",
-];
-
 interface EventFeedProps {
   /** Filter events to this address (user or merchant pubkey). */
   address?: string;

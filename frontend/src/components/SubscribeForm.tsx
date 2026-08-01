@@ -150,11 +150,7 @@ export default function SubscribeForm({
           aria-describedby={merchantError ? "merchant-error" : undefined}
           autoComplete="off"
         />
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => setShowAddressBook(true)}
-        >
+        <button type="button" className="btn-secondary" onClick={() => setShowAddressBook(true)}>
           Select from Address Book
         </button>
         {merchantError && (

@@ -22,7 +22,7 @@ import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
 import ErrorRecovery from "./ErrorRecovery";
 import SubscriptionHealthWidget from "./SubscriptionHealthWidget";
 import { Subscription } from "../types";
-import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
+import { BILLING_INTERVALS } from "../constants";
 import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
@@ -53,22 +53,6 @@ function formatInterval(secs: number): string {
   if (secs >= weekly) return `${Math.round(secs / weekly)}w`;
   if (secs >= daily) return `${Math.round(secs / daily)}d`;
   return `${secs}s`;
-}
-
-function formatTrialStatus(
-  trial_duration: number,
-  last_charged: number
-): { isInTrial: boolean; trialEndDate: string; trialDaysRemaining: number } {
-  if (trial_duration === 0) {
-    return { isInTrial: false, trialEndDate: "", trialDaysRemaining: 0 };
-  }
-  const trialEndTimestamp = last_charged + trial_duration;
-  const now = Math.floor(Date.now() / 1000);
-  const isInTrial = now < trialEndTimestamp;
-  const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
-  const trialDaysRemaining = Math.max(0, Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60)));
-
-  return { isInTrial, trialEndDate, trialDaysRemaining };
 }
 
 /**
@@ -211,7 +195,7 @@ export default function SubscriptionCard({
   onRefresh,
   onCancelled,
 }: SubscriptionCardProps) {
-  const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
+  const { merchant, amount, interval, last_charged, active, paused } = subscription;
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
   const { displayCurrentAmount } = useAmountDisplay();

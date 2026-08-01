@@ -297,7 +297,9 @@ export default function SubscriptionHistory({ userKey }: Props) {
         aria-label="Filter charge history"
       >
         {/* Date range */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
+        <div
+          style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}
+        >
           <label style={{ fontSize: "0.8rem", fontWeight: 500 }}>
             From
             <input
@@ -339,7 +341,9 @@ export default function SubscriptionHistory({ userKey }: Props) {
         </div>
 
         {/* Amount range */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
+        <div
+          style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}
+        >
           <label style={{ fontSize: "0.8rem", fontWeight: 500 }}>
             Min XLM
             <input
@@ -458,7 +462,11 @@ export default function SubscriptionHistory({ userKey }: Props) {
           style={{ padding: "var(--space-4) 0", textAlign: "center" }}
         >
           <p className="no-sub-text">No charges match the current filters.</p>
-          <button className="btn-secondary" onClick={clearFilters} style={{ marginTop: "var(--space-2)" }}>
+          <button
+            className="btn-secondary"
+            onClick={clearFilters}
+            style={{ marginTop: "var(--space-2)" }}
+          >
             Clear filters
           </button>
         </div>

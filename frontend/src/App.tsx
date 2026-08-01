@@ -24,10 +24,7 @@ export default function App() {
           <p style={{ color: "#94a3b8", marginBottom: 16, fontSize: 14 }}>
             Connect your Freighter wallet to get started.
           </p>
-          <button
-            onClick={connect}
-            style={{ background: "#7c3aed", color: "#fff" }}
-          >
+          <button onClick={connect} style={{ background: "#7c3aed", color: "#fff" }}>
             Connect Wallet
           </button>
           {error && <p style={{ color: "#f87171", marginTop: 12, fontSize: 13 }}>{error}</p>}
@@ -37,7 +34,13 @@ export default function App() {
           {/* Connected bar */}
           <div
             className="card"
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, padding: "12px 16px" }}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 20,
+              padding: "12px 16px",
+            }}
           >
             <span style={{ fontSize: 13, color: "#64748b" }}>Connected</span>
             <span style={{ fontSize: 13, fontFamily: "monospace", color: "#a78bfa" }}>
@@ -69,14 +72,13 @@ export default function App() {
               <SubscribeForm
                 userKey={publicKey}
                 onSign={signAndSubmit}
-                onSuccess={() => { setTab("dashboard"); setRefresh((r) => r + 1); }}
+                onSuccess={() => {
+                  setTab("dashboard");
+                  setRefresh((r) => r + 1);
+                }}
               />
             ) : (
-              <Dashboard
-                userKey={publicKey}
-                onSign={signAndSubmit}
-                refreshTrigger={refresh}
-              />
+              <Dashboard userKey={publicKey} onSign={signAndSubmit} refreshTrigger={refresh} />
             )}
           </div>
         </>

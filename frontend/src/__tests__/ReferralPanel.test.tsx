@@ -125,31 +125,31 @@ describe("ReferralPanel", () => {
   it("shows correct referred count based on unique referral events", async () => {
     mockFetchEvents.mockResolvedValue({
       events: [
-      {
-        address: "GABC111",
-        eventName: "referred",
-        data: {},
-        ledger: 1,
-        timestamp: "",
-        txHash: "tx1",
-      },
-      {
-        address: "GDEF222",
-        eventName: "referred",
-        data: {},
-        ledger: 2,
-        timestamp: "",
-        txHash: "tx2",
-      },
-      {
-        address: "GABC111",
-        eventName: "referred",
-        data: {},
-        ledger: 3,
-        timestamp: "",
-        txHash: "tx3",
-      }, // duplicate
-    ],
+        {
+          address: "GABC111",
+          eventName: "referred",
+          data: {},
+          ledger: 1,
+          timestamp: "",
+          txHash: "tx1",
+        },
+        {
+          address: "GDEF222",
+          eventName: "referred",
+          data: {},
+          ledger: 2,
+          timestamp: "",
+          txHash: "tx2",
+        },
+        {
+          address: "GABC111",
+          eventName: "referred",
+          data: {},
+          ledger: 3,
+          timestamp: "",
+          txHash: "tx3",
+        }, // duplicate
+      ],
     });
 
     render(<ReferralPanel publicKey={TEST_PUBLIC_KEY} />);
@@ -209,15 +209,15 @@ describe("ReferralPanel", () => {
   it("has accessible aria-label on the referred count element", async () => {
     mockFetchEvents.mockResolvedValue({
       events: [
-      {
-        address: "GABC111",
-        eventName: "referred",
-        data: {},
-        ledger: 1,
-        timestamp: "",
-        txHash: "tx1",
-      },
-    ],
+        {
+          address: "GABC111",
+          eventName: "referred",
+          data: {},
+          ledger: 1,
+          timestamp: "",
+          txHash: "tx1",
+        },
+      ],
     });
     render(<ReferralPanel publicKey={TEST_PUBLIC_KEY} />);
 
