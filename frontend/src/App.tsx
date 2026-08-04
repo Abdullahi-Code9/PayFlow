@@ -1,15 +1,22 @@
 import React, { useState } from "react";
-import { useWallet } from "./hooks/useWallet";
+import { useWallet, AVAILABLE_WALLETS } from "./hooks/useWallet";
+import { useAccessibility } from "./hooks/useAccessibility";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
 
 export default function App() {
   const { publicKey, connect, signAndSubmit, error } = useWallet();
+  const { announcement, announce } = useAccessibility();
   const [tab, setTab] = useState<"subscribe" | "dashboard">("dashboard");
   const [refresh, setRefresh] = useState(0);
 
   return (
     <div style={{ maxWidth: 480, margin: "60px auto", padding: "0 16px" }}>
+      {/* ARIA live region for screen reader announcements */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </div>
+
       {/* Header */}
       <div style={{ marginBottom: 32, textAlign: "center" }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: "#a78bfa" }}>⚡ FlowPay</h1>
@@ -24,7 +31,10 @@ export default function App() {
           <p style={{ color: "#94a3b8", marginBottom: 16, fontSize: 14 }}>
             Connect your Freighter wallet to get started.
           </p>
-          <button onClick={connect} style={{ background: "#7c3aed", color: "#fff" }}>
+          <button
+            onClick={() => connect(AVAILABLE_WALLETS[0])}
+            style={{ background: "#7c3aed", color: "#fff" }}
+          >
             Connect Wallet
           </button>
           {error && <p style={{ color: "#f87171", marginTop: 12, fontSize: 13 }}>{error}</p>}
@@ -78,7 +88,12 @@ export default function App() {
                 }}
               />
             ) : (
-              <Dashboard userKey={publicKey} onSign={signAndSubmit} refreshTrigger={refresh} />
+              <Dashboard
+                userKey={publicKey}
+                onSign={signAndSubmit}
+                refreshTrigger={refresh}
+                announce={announce}
+              />
             )}
           </div>
         </>

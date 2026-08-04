@@ -232,7 +232,7 @@ export default function SubscribeForm({
           onChange={(e) => setReferrer(e.target.value)}
           autoComplete="off"
         />
-        <AllowanceDisplay userKey={userKey} subscriptionAmount={0n} />
+        <AllowanceDisplay userKey={userKey} subscriptionAmount={0n} refreshTrigger={0} />
       </div>
 
       <button

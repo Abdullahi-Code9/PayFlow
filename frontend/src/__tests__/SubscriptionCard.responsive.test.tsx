@@ -67,7 +67,9 @@ function renderCard() {
 }
 
 describe("SubscriptionCard – responsive layout", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("applies subscription-row--stacked class on mobile (375px)", () => {
     setViewport(375);

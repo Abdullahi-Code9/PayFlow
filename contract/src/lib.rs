@@ -722,7 +722,9 @@ impl FlowPay {
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
-        if !sub.active {
+        // Reject cancelled subscriptions (inactive and not paused).
+        // pause_until sets active=false while paused=true; those must still be resumable.
+        if !sub.active && !sub.paused {
             env.panic_with_error(ContractError::SubscriptionInactive);
         }
 
@@ -1753,18 +1755,11 @@ impl FlowPay {
 
         let total_merchants = merchant_stats::get_merchant_index_size(&env);
         let mut pending_merchant_rev_count = 0;
-        for i in 0..total_merchants {
-            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
-                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_rev_count += 1;
-        for i in 0..total_merchants {
-            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
-                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_rev_count += 1;
         let mut pending_merchant_revenue_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
+                    pending_merchant_rev_count += 1;
                     pending_merchant_revenue_count += 1;
                 }
             }
