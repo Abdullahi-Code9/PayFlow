@@ -1,6 +1,6 @@
 use soroban_sdk::{token, Address, Env};
 
-use crate::{errors::ContractError, validation, DataKey, Subscription};
+use crate::{errors::ContractError, DataKey, Subscription};
 
 /// Retrieves the fee collector address from instance storage.
 pub fn get_fee_collector(env: &Env) -> Option<Address> {
