@@ -65,7 +65,9 @@ function setupMocks(sub: typeof ACTIVE_SUB | null = ACTIVE_SUB) {
 }
 
 describe("Dashboard – responsive layout", () => {
-  afterEach(() => vi.resetAllMocks());
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
 
   it("applies dashboard--mobile class on mobile viewport (375px)", async () => {
     setViewport(375);
