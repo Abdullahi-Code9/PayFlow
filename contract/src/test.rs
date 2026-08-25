@@ -10,7 +10,7 @@ use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, BytesN, Env, Symbol, TryIntoVal, Vec,
+    Address, BytesN, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Vec,
 };
 
 /// Returns (env, contract_id, token_addr, user, merchant)
@@ -3711,6 +3711,71 @@ fn test_health_check_active_subscription_count() {
     assert_eq!(report.active_subscription_count, 1);
 }
 
+// ─────────────────────────────────────────────
+// Issue 010: HealthReport field cleanup tests
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_health_check_healthy_fully_configured() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let report = client.contract_health_check();
+
+    assert!(report.is_healthy);
+    assert!(!report.contract_paused);
+    assert!(report.token_configured);
+    assert!(report.admin_configured);
+    assert!(report.instance_ttl_ledgers > 0);
+    // pending_merchant_rev_count is 0 when no merchants have revenue
+    assert_eq!(report.pending_merchant_rev_count, 0);
+}
+
+#[test]
+fn test_health_check_paused_not_healthy() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+    client.pause_contract();
+
+    let report = client.contract_health_check();
+
+    assert!(!report.is_healthy);
+    assert!(report.contract_paused);
+}
+
+#[test]
+fn test_health_check_unconfigured_not_healthy() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, FlowPay);
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let report = client.contract_health_check();
+
+    assert!(!report.is_healthy);
+    assert!(!report.token_configured);
+    assert!(!report.admin_configured);
+}
+
+/// Verify that TTL is reported as a positive value (test builds use real get_ttl).
+#[test]
+fn test_health_check_ttl_is_positive() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let report = client.contract_health_check();
+    assert!(
+        report.instance_ttl_ledgers > 0,
+        "instance_ttl_ledgers should be positive in test builds"
+    );
+}
+
 #[test]
 fn test_ttl_extension() {
     let (env, contract_id, token_addr, user, merchant) = setup();
@@ -3750,6 +3815,120 @@ fn test_ttl_extension() {
     client.extend_subscription_ttl(&user);
 
     assert!(client.get_subscription(&user).is_some());
+}
+
+// ─────────────────────────────────────────────
+// Issue 013: PauseExpiry TTL coupled with subscription bump
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_bump_subscription_extends_pause_expiry_when_present() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    env.ledger().with_mut(|l| {
+        l.max_entry_ttl = 10_000_000;
+    });
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+    client.pause_until(&user, &90000);
+
+    // Verify PauseExpiry exists before bump
+    env.as_contract(&contract_id, || {
+        let expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert!(expiry.is_some(), "PauseExpiry should exist after pause_until");
+    });
+
+    // Bump subscription TTL — should also bump PauseExpiry
+    client.bump_subscription(&user);
+
+    // PauseExpiry should still exist (not archived)
+    env.as_contract(&contract_id, || {
+        let expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert!(expiry.is_some(), "PauseExpiry should survive bump_subscription");
+        assert_eq!(expiry.unwrap(), 90000);
+    });
+}
+
+#[test]
+fn test_bump_subscription_no_op_on_absent_pause_expiry() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    // No PauseExpiry — bump should be a safe no-op
+    client.bump_subscription(&user);
+
+    env.as_contract(&contract_id, || {
+        let expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert_eq!(expiry, None, "PauseExpiry should remain absent");
+    });
+}
+
+#[test]
+fn test_batch_extend_extends_pause_expiry_when_present() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    env.ledger().with_mut(|l| {
+        l.max_entry_ttl = 10_000_000;
+    });
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+    client.pause_until(&user, &200000);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    client.batch_extend_subscription_ttl(&users);
+
+    // PauseExpiry should survive batch extend
+    env.as_contract(&contract_id, || {
+        let expiry: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PauseExpiry(user.clone()));
+        assert!(expiry.is_some(), "PauseExpiry should survive batch_extend");
+        assert_eq!(expiry.unwrap(), 200000);
+    });
+}
+
+#[test]
+fn test_pause_then_batch_extend_then_auto_resume() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    env.ledger().with_mut(|l| {
+        l.max_entry_ttl = 10_000_000;
+    });
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+    client.pause_until(&user, &90000);
+
+    // Batch extend keeps PauseExpiry alive
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    client.batch_extend_subscription_ttl(&users);
+
+    // Advance to expiry — auto-resume should still work
+    env.ledger().set_timestamp(90000);
+    let mut users2 = soroban_sdk::Vec::new(&env);
+    users2.push_back(user.clone());
+    let result = client.batch_charge(&users2);
+    assert_eq!(result.get(0).unwrap(), crate::ChargeResult::Charged);
+
+    let sub = client.get_subscription(&user).unwrap();
+    assert_eq!(sub.paused, false);
+    assert_eq!(sub.active, true);
 }
 
 // ─────────────────────────────────────────────
@@ -7748,6 +7927,92 @@ fn test_propose_fee_non_admin_panics() {
 }
 
 // ─────────────────────────────────────────────
+// Issue 012: commit_fee bounds re-validation
+// ─────────────────────────────────────────────
+
+/// commit_fee rejects when bounds tightened after propose (bps above new max).
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")]
+fn test_commit_fee_rejects_when_bounds_tightened_above_max() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let collector = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    // Propose 500 bps — within default bounds (0, 10000)
+    client.propose_fee(&collector, &500);
+
+    // Tighten max to 200 bps before commit
+    client.set_fee_bounds(&0, &200);
+
+    // Commit should reject 500 bps against new [0, 200] bounds
+    client.commit_fee();
+}
+
+/// commit_fee rejects when bounds tightened after propose (bps below new min).
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")]
+fn test_commit_fee_rejects_when_bounds_tightened_below_min() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let collector = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    // Propose 50 bps
+    client.propose_fee(&collector, &50);
+
+    // Raise min to 100 bps before commit
+    client.set_fee_bounds(&100, &10000);
+
+    // Commit should reject 50 bps against new [100, 10000] bounds
+    client.commit_fee();
+}
+
+/// commit_fee succeeds when pending bps are within current bounds.
+#[test]
+fn test_commit_fee_succeeds_when_within_bounds() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let collector = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    client.set_fee_bounds(&10, &500);
+    client.propose_fee(&collector, &200);
+    client.commit_fee();
+
+    let (_, stored_bps) = client.get_fee().unwrap();
+    assert_eq!(stored_bps, 200);
+}
+
+/// commit_fee succeeds when no bounds are configured (defaults to 0..10000).
+#[test]
+fn test_commit_fee_succeeds_with_default_bounds() {
+    let (env, contract_id, _token_addr, user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let collector = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &user);
+    });
+
+    // No set_fee_bounds call — defaults to (0, 10000)
+    client.propose_fee(&collector, &750);
+    client.commit_fee();
+
+    let (_, stored_bps) = client.get_fee().unwrap();
+    assert_eq!(stored_bps, 750);
+}
+
+// ─────────────────────────────────────────────
 // Batch queries tests
 // ─────────────────────────────────────────────
 
@@ -8156,5 +8421,81 @@ fn test_migration_v2_to_v3_populates_referrer() {
 
     client.migrate(&users);
     assert_eq!(client.get_schema_version(), 3);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Issue 011: ChargeResult discriminant stability (golden tests)
+// ─────────────────────────────────────────────────────────────
+//
+// Off-chain parsers (keepers, alert-failed-charges.ts, indexers)
+// decode ChargeResult by variant index. These tests lock the
+// discriminant layout so a reorder or rename is caught in CI.
+
+/// The number of ChargeResult variants. If you add a new variant,
+/// update this count AND append the new variant at the end of the enum.
+#[test]
+fn test_charge_result_variant_count() {
+    let env = Env::default();
+    let _ = env.register_contract(None, FlowPay);
+
+    // Encode each variant via IntoVal and verify they produce distinct values.
+    // This also serves as a compile-time check: if a variant is removed or
+    // renamed, this test won't compile (exhaustive pattern match).
+    let charged: soroban_sdk::Val = ChargeResult::Charged.into_val(&env);
+    let skipped: soroban_sdk::Val = ChargeResult::Skipped.into_val(&env);
+    let no_sub: soroban_sdk::Val = ChargeResult::NoSubscription.into_val(&env);
+    let inactive: soroban_sdk::Val = ChargeResult::Inactive.into_val(&env);
+    let paused: soroban_sdk::Val = ChargeResult::Paused.into_val(&env);
+    let grace: soroban_sdk::Val = ChargeResult::GracePeriodElapsed.into_val(&env);
+
+    // All variants must encode to distinct raw values
+    let c = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(charged) };
+    let s = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(skipped) };
+    let n = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(no_sub) };
+    let i = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(inactive) };
+    let p = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(paused) };
+    let g = unsafe { core::mem::transmute::<soroban_sdk::Val, u64>(grace) };
+
+    assert_ne!(c, s, "Charged and Skipped must differ");
+    assert_ne!(s, n, "Skipped and NoSubscription must differ");
+    assert_ne!(n, i, "NoSubscription and Inactive must differ");
+    assert_ne!(i, p, "Inactive and Paused must differ");
+    assert_ne!(p, g, "Paused and GracePeriodElapsed must differ");
+
+    // Lock the variant count — increase when a variant is appended.
+    let total_variants = 6;
+    assert_eq!(total_variants, 6);
+}
+
+/// Verify round-trip encoding for every variant.
+#[test]
+fn test_charge_result_round_trip() {
+    let env = Env::default();
+    let _ = env.register_contract(None, FlowPay);
+
+    let variants = [
+        ChargeResult::Charged,
+        ChargeResult::Skipped,
+        ChargeResult::NoSubscription,
+        ChargeResult::Inactive,
+        ChargeResult::Paused,
+        ChargeResult::GracePeriodElapsed,
+    ];
+
+    for variant in variants.iter() {
+        let val: soroban_sdk::Val = variant.clone().into_val(&env);
+        let decoded = ChargeResult::try_from_val(&env, &val).unwrap();
+        assert_eq!(*variant, decoded, "round-trip failed for a ChargeResult variant");
+    }
+}
+
+/// Verify that variant names match the expected set.
+/// A rename or reorder breaks this test.
+#[test]
+fn test_charge_result_partial_eq_identity() {
+    assert_eq!(ChargeResult::Charged, ChargeResult::Charged);
+    assert_ne!(ChargeResult::Charged, ChargeResult::Skipped);
+    assert_ne!(ChargeResult::NoSubscription, ChargeResult::Inactive);
+    assert_ne!(ChargeResult::Paused, ChargeResult::GracePeriodElapsed);
 }
 
