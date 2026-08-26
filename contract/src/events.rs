@@ -92,13 +92,14 @@ pub fn publish_charged(
 // stays available off-chain via the return value and `get_batch_charge_estimate`.
 //
 // Emission is conditional: the event fires only when at least one *interesting*
-// outcome occurred (no_subscription / inactive / paused / grace_elapsed). An
-// all-charged or all-not-due batch emits nothing, so the steady state costs
-// exactly what it did before.
+// outcome occurred (no_subscription / inactive / paused / grace_elapsed /
+// allowance_insufficient). An all-charged or all-not-due batch emits nothing,
+// so the steady state costs exactly what it did before.
 
 /// Aggregate outcome counts for a single `batch_charge` call.
 ///
-/// `charged + not_due + no_subscription + inactive + grace_elapsed + paused == total`.
+/// `charged + not_due + no_subscription + inactive + grace_elapsed + paused
+/// + allowance_insufficient == total`.
 #[soroban_sdk::contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BatchChargeSkipsEventData {
@@ -116,6 +117,10 @@ pub struct BatchChargeSkipsEventData {
     pub paused: u32,
     /// `ChargeResult::GracePeriodElapsed`
     pub grace_elapsed: u32,
+    /// `ChargeResult::AllowanceInsufficient` — the subscriber's allowance is
+    /// below the gross amount. This is the alerting case: the subscription is
+    /// still active and will keep failing until the subscriber re-approves.
+    pub allowance_insufficient: u32,
     pub ledger_sequence: u32,
 }
 

@@ -45,6 +45,9 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 | 29   | `InvalidBatchSize`          | Validation   | Configured batch limit invalid     |
 | 30   | `ContractPausedError`       | State        | Subscribe while paused             |
 | 32   | `InvalidRecipient`          | Validation   | Recipient address invalid          |
+| 33   | `InvalidVolumeCap`          | Validation   | Volume cap override not positive   |
+| 34   | `InvalidFeeBounds`          | Validation   | Fee bounds min/max invalid         |
+| 35   | `FeeOutOfBoundsAtCommit`    | Validation   | Pending fee outside bounds         |
 | 36   | `ArithmeticOverflow`        | State        | Checked arithmetic would overflow  |
 
 > **Note:** Code `31` is intentionally unused. Source of truth: [`contract/src/errors.rs`](../contract/src/errors.rs).
@@ -179,12 +182,15 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 | **When it occurs**  | Charge, subscribe, or pay-per-use path finds token allowance below required amount |
 | **Immediate cause** | SAC `allowance(user → FlowPay)` is too low or spent down             |
 
-`charge()` / `batch_charge()` / `pay_per_use*()` preflight the allowance against
-the **gross** amount before any transfer runs. When a protocol fee is
-configured the charge is pulled in two legs (fee → collector, net → merchant)
-against that same allowance, so an allowance covering only the fee leg is
-rejected up front rather than part-way through. Budget for `amount`, not
-`amount - fee`.
+`charge()` and `pay_per_use*()` preflight the allowance against the **gross**
+amount before any transfer runs. When a protocol fee is configured the charge
+is pulled in two legs (fee → collector, net → merchant) against that same
+allowance, so an allowance covering only the fee leg is rejected up front
+rather than part-way through. Budget for `amount`, not `amount - fee`.
+
+`batch_charge()` does **not** raise this error: it records
+`ChargeResult::AllowanceInsufficient` for that subscriber and continues the
+batch. See [`EVENTS.md`](EVENTS.md#batch_charge_skips).
 
 **Recovery steps**
 
@@ -578,6 +584,54 @@ rejected up front rather than part-way through. Budget for `amount`, not
 
 ---
 
+### 33 — `InvalidVolumeCap`
+
+| Field               | Detail                                                         |
+| ------------------- | -------------------------------------------------------------- |
+| **When it occurs**  | Admin `set_global_volume_cap` with `new_cap <= 0`              |
+| **Immediate cause** | Configured hourly volume cap must be strictly positive         |
+
+**Recovery steps**
+
+1. Choose a positive cap in stroops.
+2. Retry `set_global_volume_cap` as admin.
+
+**Prevention:** Validate `new_cap > 0` in admin tooling. See [`MAINNET-DEPLOYMENT.md`](./MAINNET-DEPLOYMENT.md#2-volume-cap).
+
+---
+
+### 34 — `InvalidFeeBounds`
+
+| Field               | Detail                                                                      |
+| ------------------- | --------------------------------------------------------------------------- |
+| **When it occurs**  | Admin `set_fee_bounds` with `min_bps > max_bps` or `max_bps > 10_000`      |
+| **Immediate cause** | Fee bound range is empty or exceeds 100% (10_000 bps)                       |
+
+**Recovery steps**
+
+1. Choose `min_bps <= max_bps` with `max_bps <= 10000`.
+2. Retry `set_fee_bounds` as admin.
+
+**Prevention:** Validate bounds in admin UI before signing. See [`API.md`](./API.md#set_fee_bounds).
+
+---
+
+### 35 — `FeeOutOfBoundsAtCommit`
+
+| Field               | Detail                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| **When it occurs**  | `commit_fee` when pending bps is outside current `[MinFeeBps, MaxFeeBps]`              |
+| **Immediate cause** | Bounds were tightened (or never matched) between `propose_fee` and `commit_fee`        |
+
+**Recovery steps**
+
+1. Call `get_fee_bounds` and `get_fee` / inspect pending proposal.
+2. Either `set_fee_bounds` to include the pending bps, or `propose_fee` again with in-range bps, then `commit_fee`.
+
+**Prevention:** Set bounds before proposing; do not tighten bounds under an in-flight proposal unless that is intended.
+
+---
+
 ### 36 — `ArithmeticOverflow`
 
 | Field               | Detail                                                                                                       |
@@ -606,7 +660,7 @@ is not representable at all.
 | -------------- | ---------------------------------------- | ----------------------------- |
 | Auth / access  | 8, 10, 22                                | User + admin                  |
 | State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36 | Deployer, user, admin, keeper |
-| Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32 | Client / admin tooling        |
+| Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32, 33, 34, 35 | Client / admin tooling        |
 | Limit / timing | 6, 9, 15, 20, 25, 28                     | Keeper + user                 |
 
 ---
@@ -711,6 +765,7 @@ Always map numeric Soroban contract errors to this document before inventing new
 ## Related
 
 - Contract source: [`contract/src/errors.rs`](../contract/src/errors.rs)
+- Troubleshooting runbook: [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 - Keeper guide: [`docs/KEEPER.md`](KEEPER.md)
 - API reference: [`docs/API.md`](API.md)
 - Security model: [`docs/SECURITY.md`](SECURITY.md)

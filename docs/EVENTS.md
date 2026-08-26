@@ -200,7 +200,7 @@ Events related to charges and payments.
   ```
 
 ### batch_charge_skips
-- **Trigger**: `batch_charge()` — **only** when the batch contained at least one *interesting* non-success outcome (`NoSubscription`, `Inactive`, `Paused`, `GracePeriodElapsed`). An all-charged or all-not-due batch emits nothing.
+- **Trigger**: `batch_charge()` — **only** when the batch contained at least one *interesting* non-success outcome (`NoSubscription`, `Inactive`, `Paused`, `GracePeriodElapsed`, `AllowanceInsufficient`). An all-charged or all-not-due batch emits nothing.
 - **Topic keys**: `["batch_charge_skips"]` — batch-level, so there is **no address topic**
 - **Payload schema**:
   ```rust
@@ -212,6 +212,7 @@ Events related to charges and payments.
     inactive: u32,         // ChargeResult::Inactive
     paused: u32,           // ChargeResult::Paused
     grace_elapsed: u32,    // ChargeResult::GracePeriodElapsed
+    allowance_insufficient: u32, // ChargeResult::AllowanceInsufficient
     ledger_sequence: u32
   }
   ```
@@ -227,6 +228,7 @@ Events related to charges and payments.
       "inactive": 1,
       "paused": 1,
       "grace_elapsed": 1,
+      "allowance_insufficient": 0,
       "ledger_sequence": 12345
     }
   }
@@ -236,9 +238,9 @@ Events related to charges and payments.
 
 - `charged` is **unchanged**; this event is purely additive. Consumers that ignore unknown event names keep working.
 - The topic tuple has length 1. Parsers that assume `topic[1]` is a subscriber address (as [`scripts/indexer.ts`](../scripts/indexer.ts) does) will store an empty `address` for this row — that is correct, not a parse failure. Do not drop the event for a missing `topic[1]`.
-- Counts reconcile: `charged + not_due + no_subscription + inactive + paused + grace_elapsed == total`. Use this to detect a truncated or mis-decoded payload.
+- Counts reconcile: `charged + not_due + no_subscription + inactive + paused + grace_elapsed + allowance_insufficient == total`. Use this to detect a truncated or mis-decoded payload.
 - **Per-user attribution is deliberately not in the event.** One summary per batch keeps event fees and ledger footprint flat in batch size, rather than growing one event per skipped address. To identify *which* subscribers were skipped, read the `batch_charge` return value, or call `get_batch_charge_estimate(users)` — it returns the same per-address `ChargeResult` vector without mutating state.
-- **Allowance failures never appear here.** An insufficient allowance aborts the whole `batch_charge` invocation atomically (the gross-allowance preflight in `fee.rs`), so no partial batch and no event are committed. Monitor those via transaction failure with error `8 InsufficientAllowance`, not via this event.
+- **`allowance_insufficient` is the alerting count.** `batch_charge` tolerates a subscriber whose allowance is below the gross amount: it records `ChargeResult::AllowanceInsufficient` for that address and continues the batch (no funds move, the subscription stays active). Those subscribers keep failing every cycle until they re-approve, so a non-zero count here is the signal to notify them. Outside `batch_charge` — single `charge()` and `pay_per_use*()` — an insufficient allowance still aborts the invocation with error `8 InsufficientAllowance` and emits nothing.
 - **Instruction impact:** measured on an 11-address batch (10 charged, 1 skipped): **+39,515 CPU instructions and +13,262 memory bytes** versus the same batch without the event — a flat per-batch cost, paid only when the event actually fires.
 
 ### pay_per_use
@@ -626,6 +628,8 @@ Events related to referral tracking.
     "data": "GDEF...ABC"
   }
   ```
+
+See the canonical referral guide: [`REFERRALS.md`](./REFERRALS.md#referred-event).
 
 ---
 

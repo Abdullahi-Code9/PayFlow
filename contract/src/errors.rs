@@ -73,4 +73,10 @@ pub enum ContractError {
     /// Returned when a checked arithmetic operation overflows (trial extension,
     /// fee calculation, protocol-fee accrual, or global volume accumulation)
     ArithmeticOverflow = 36,
+    /// Returned when a refund is requested by a merchant different from the subscription merchant
+    RefundMerchantMismatch = 38,
+    /// Returned when prorated cancellation would produce no refund
+    RefundAmountMustBePositive = 39,
+    /// Returned when the merchant cannot fund the requested refund
+    InsufficientMerchantBalance = 40,
 }

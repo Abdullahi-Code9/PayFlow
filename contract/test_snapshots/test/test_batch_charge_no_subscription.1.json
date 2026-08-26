@@ -930,6 +930,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "allowance_insufficient"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "charged"
                   },
                   "val": {

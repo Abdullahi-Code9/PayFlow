@@ -2312,10 +2312,41 @@ fn test_cancel_and_refund_prorated_transfers_expected_amount() {
 }
 
 #[test]
-fn test_cancel_and_refund_prorated_at_interval_end_transfers_nothing() {
+fn test_cancel_and_refund_prorated_at_period_start_refunds_full_amount() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
     let token = TokenClient::new(&env, &token_addr);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+
+    sac.mint(&merchant, &10_000_0000000);
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let merchant_balance_before = token.balance(&merchant);
+    let user_balance_before = token.balance(&user);
+
+    client.cancel_and_refund_prorated(&user, &merchant);
+
+    assert_eq!(
+        token.balance(&merchant),
+        merchant_balance_before - 1_0000000
+    );
+    assert_eq!(token.balance(&user), user_balance_before + 1_0000000);
+    assert!(!client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #39)")]
+fn test_cancel_and_refund_prorated_at_interval_end_rejects_zero_refund() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
     let sac = StellarAssetClient::new(&env, &token_addr);
 
     sac.mint(&merchant, &10_000_0000000);
@@ -2334,25 +2365,109 @@ fn test_cancel_and_refund_prorated_at_interval_end_transfers_nothing() {
         l.timestamp = 3600;
     });
 
-    let merchant_balance_before = token.balance(&merchant);
-    let user_balance_before = token.balance(&user);
-
     client.cancel_and_refund_prorated(&user, &merchant);
-
-    assert_eq!(token.balance(&merchant), merchant_balance_before);
-    assert_eq!(token.balance(&user), user_balance_before);
-
-    let sub = client.get_subscription(&user).unwrap();
-    assert!(!sub.active);
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Error(Contract, #38)")]
+fn test_cancel_and_refund_prorated_rejects_wrong_merchant() {
+    let (env, contract_id, _token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let actual_merchant = Address::generate(&env);
+
+    client.subscribe(
+        &user,
+        &actual_merchant,
+        &1_0000000,
+        &3600,
+        &_token_addr,
+        &None,
+        &None,
+    );
+
+    client.cancel_and_refund_prorated(&user, &merchant);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_cancel_and_refund_prorated_missing_subscription_panics() {
     let (env, contract_id, _token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
 
     client.cancel_and_refund_prorated(&user, &merchant);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_underfunded_merchant_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    env.ledger().with_mut(|l| l.timestamp = 1800);
+
+    let merchant_balance_before = token.balance(&merchant);
+    let user_balance_before = token.balance(&user);
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    assert_eq!(token.balance(&merchant), merchant_balance_before);
+    assert_eq!(token.balance(&user), user_balance_before);
+    assert!(client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_inactive_subscription_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.cancel(&user);
+
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    assert!(!client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_paused_subscription_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.pause(&user);
+
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    let sub = client.get_subscription(&user).unwrap();
+    assert!(sub.active);
+    assert!(sub.paused);
 }
 
 #[test]
@@ -2532,6 +2647,365 @@ fn test_batch_charge_grace_period_elapsed() {
         results.get(0).unwrap(),
         crate::ChargeResult::GracePeriodElapsed
     );
+}
+
+// -----------------------------------------------------------------
+// Issue #794: batch_charge AllowanceInsufficient tolerance tests
+// -----------------------------------------------------------------
+
+/// A subscriber with zero allowance receives AllowanceInsufficient; no funds move.
+#[test]
+fn test_batch_charge_zero_allowance_returns_allowance_insufficient() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+
+    // Revoke the allowance entirely.
+    token.approve(&user, &contract_id, &0, &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let user_balance_before = token.balance(&user);
+    let merchant_balance_before = token.balance(&merchant);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(
+        results.get(0).unwrap(),
+        crate::ChargeResult::AllowanceInsufficient,
+        "zero allowance must produce AllowanceInsufficient"
+    );
+    assert_eq!(token.balance(&user), user_balance_before, "user balance unchanged");
+    assert_eq!(token.balance(&merchant), merchant_balance_before, "merchant balance unchanged");
+}
+
+/// A subscriber whose allowance is exactly the subscription amount is charged.
+#[test]
+fn test_batch_charge_exact_allowance_succeeds() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let amount: i128 = 5_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+
+    // Set allowance to exactly the gross amount.
+    token.approve(&user, &contract_id, &amount, &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(
+        results.get(0).unwrap(),
+        crate::ChargeResult::Charged,
+        "exact allowance must allow the charge"
+    );
+    assert_eq!(
+        token.balance(&user),
+        10_000_0000000 - amount,
+        "user debited gross amount"
+    );
+}
+
+/// A subscriber with allowance one stroop below sub.amount is rejected.
+#[test]
+fn test_batch_charge_one_below_allowance_returns_allowance_insufficient() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let amount: i128 = 5_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+
+    // Set allowance to one stroop below gross.
+    token.approve(&user, &contract_id, &(amount - 1), &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let user_balance_before = token.balance(&user);
+    let merchant_balance_before = token.balance(&merchant);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(
+        results.get(0).unwrap(),
+        crate::ChargeResult::AllowanceInsufficient
+    );
+    assert_eq!(token.balance(&user), user_balance_before);
+    assert_eq!(token.balance(&merchant), merchant_balance_before);
+}
+
+/// Mixed batch: Alice (sufficient) -> Bob (insufficient) -> Charlie (sufficient).
+/// Bob's failure must not abort Alice's or Charlie's charges.
+#[test]
+fn test_batch_charge_mixed_allowance_does_not_abort_healthy_users() {
+    let (env, contract_id, token_addr, alice, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+
+    let bob = Address::generate(&env);
+    let charlie = Address::generate(&env);
+    sac.mint(&bob, &10_000_0000000);
+    sac.mint(&charlie, &10_000_0000000);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    for u in [&alice, &bob, &charlie] {
+        token.approve(u, &contract_id, &10_000_0000000, &200);
+        client.subscribe(u, &merchant, &amount, &interval, &token_addr, &None, &None);
+    }
+
+    // Bob revokes to an insufficient amount.
+    token.approve(&bob, &contract_id, &(amount / 2), &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let alice_before = token.balance(&alice);
+    let bob_before = token.balance(&bob);
+    let charlie_before = token.balance(&charlie);
+    let merchant_before = token.balance(&merchant);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(alice.clone());
+    users.push_back(bob.clone());
+    users.push_back(charlie.clone());
+
+    let results = client.batch_charge(&users);
+
+    assert_eq!(results.get(0).unwrap(), crate::ChargeResult::Charged, "Alice charged");
+    assert_eq!(
+        results.get(1).unwrap(),
+        crate::ChargeResult::AllowanceInsufficient,
+        "Bob insufficient"
+    );
+    assert_eq!(results.get(2).unwrap(), crate::ChargeResult::Charged, "Charlie charged");
+
+    assert_eq!(alice_before - token.balance(&alice), amount, "Alice debited");
+    assert_eq!(token.balance(&bob), bob_before, "Bob untouched");
+    assert_eq!(charlie_before - token.balance(&charlie), amount, "Charlie debited");
+    assert_eq!(
+        token.balance(&merchant) - merchant_before,
+        amount * 2,
+        "merchant received exactly 2 charges"
+    );
+}
+
+/// Multiple under-allowanced users in one batch all return AllowanceInsufficient.
+#[test]
+fn test_batch_charge_multiple_insufficient_allowances() {
+    let (env, contract_id, token_addr, user_a, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+
+    let user_b = Address::generate(&env);
+    sac.mint(&user_b, &10_000_0000000);
+
+    let amount: i128 = 2_0000000;
+    let interval: u64 = 86400;
+
+    for u in [&user_a, &user_b] {
+        token.approve(u, &contract_id, &10_000_0000000, &200);
+        client.subscribe(u, &merchant, &amount, &interval, &token_addr, &None, &None);
+        token.approve(u, &contract_id, &(amount - 1), &200);
+    }
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let a_before = token.balance(&user_a);
+    let b_before = token.balance(&user_b);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user_a.clone());
+    users.push_back(user_b.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(results.get(0).unwrap(), crate::ChargeResult::AllowanceInsufficient);
+    assert_eq!(results.get(1).unwrap(), crate::ChargeResult::AllowanceInsufficient);
+    assert_eq!(token.balance(&user_a), a_before);
+    assert_eq!(token.balance(&user_b), b_before);
+}
+
+/// Healthy user before AND after an under-allowanced user both get charged.
+#[test]
+fn test_batch_charge_healthy_before_and_after_insufficient() {
+    let (env, contract_id, token_addr, healthy_a, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+
+    let insufficient = Address::generate(&env);
+    let healthy_b = Address::generate(&env);
+    sac.mint(&insufficient, &10_000_0000000);
+    sac.mint(&healthy_b, &10_000_0000000);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    for u in [&healthy_a, &insufficient, &healthy_b] {
+        token.approve(u, &contract_id, &10_000_0000000, &200);
+        client.subscribe(u, &merchant, &amount, &interval, &token_addr, &None, &None);
+    }
+
+    token.approve(&insufficient, &contract_id, &0, &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let ha_before = token.balance(&healthy_a);
+    let hb_before = token.balance(&healthy_b);
+    let ins_before = token.balance(&insufficient);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(healthy_a.clone());
+    users.push_back(insufficient.clone());
+    users.push_back(healthy_b.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(results.get(0).unwrap(), crate::ChargeResult::Charged);
+    assert_eq!(results.get(1).unwrap(), crate::ChargeResult::AllowanceInsufficient);
+    assert_eq!(results.get(2).unwrap(), crate::ChargeResult::Charged);
+
+    assert_eq!(ha_before - token.balance(&healthy_a), amount);
+    assert_eq!(token.balance(&insufficient), ins_before);
+    assert_eq!(hb_before - token.balance(&healthy_b), amount);
+}
+
+/// Auto-resume + insufficient allowance: subscription resumes but charge fails cleanly.
+#[test]
+fn test_batch_charge_auto_resume_with_insufficient_allowance() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+    client.pause_until(&user, &90_000);
+
+    // Revoke allowance while paused.
+    token.approve(&user, &contract_id, &0, &200);
+
+    // Advance past both the pause expiry and the charge interval.
+    env.ledger().set_timestamp(90_001);
+
+    let user_balance_before = token.balance(&user);
+    let merchant_balance_before = token.balance(&merchant);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(
+        results.get(0).unwrap(),
+        crate::ChargeResult::AllowanceInsufficient,
+        "auto-resume + zero allowance must not panic"
+    );
+    assert_eq!(token.balance(&user), user_balance_before);
+    assert_eq!(token.balance(&merchant), merchant_balance_before);
+    let sub = client.get_subscription(&user).unwrap();
+    assert!(sub.active);
+    assert!(!sub.paused);
+}
+
+/// get_batch_charge_estimate returns AllowanceInsufficient for an under-allowanced
+/// due subscriber, mirroring the live batch behavior.
+#[test]
+fn test_batch_charge_estimate_reflects_allowance_insufficient() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let amount: i128 = 1_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &amount, &interval, &token_addr, &None, &None);
+    token.approve(&user, &contract_id, &(amount - 1), &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let users = soroban_sdk::vec![&env, user.clone()];
+    let estimate = client.get_batch_charge_estimate(&users);
+    assert_eq!(
+        estimate.get(0).unwrap(),
+        crate::batch::ChargeResult::AllowanceInsufficient
+    );
+}
+
+/// Allowance check is against gross sub.amount, NOT the post-fee net amount.
+/// Allowance == net (< gross) must still return AllowanceInsufficient.
+#[test]
+fn test_batch_charge_allowance_checked_against_gross_not_net() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    let admin = Address::generate(&env);
+    let collector = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        crate::storage::set_admin(&env, &admin);
+    });
+    // 10% fee: net = 90% of gross.
+    client.propose_fee(&collector, &1000);
+    client.commit_fee();
+
+    let gross: i128 = 1_0000000;
+    let net: i128 = gross - gross * 1000 / 10_000; // 9_000_000
+    let interval: u64 = 86400;
+
+    client.subscribe(&user, &merchant, &gross, &interval, &token_addr, &None, &None);
+
+    // Set allowance to exactly the net amount -- below gross.
+    token.approve(&user, &contract_id, &net, &200);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let user_balance_before = token.balance(&user);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user.clone());
+    let results = client.batch_charge(&users);
+
+    assert_eq!(
+        results.get(0).unwrap(),
+        crate::ChargeResult::AllowanceInsufficient,
+        "allowance == net but < gross must still fail"
+    );
+    assert_eq!(token.balance(&user), user_balance_before, "no funds moved");
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -9196,7 +9670,8 @@ fn test_batch_charge_emits_skips_summary_with_counts() {
             + summary.paused
             + summary.inactive
             + summary.grace_elapsed
-            + summary.no_subscription,
+            + summary.no_subscription
+            + summary.allowance_insufficient,
         summary.total
     );
 }
@@ -9263,6 +9738,54 @@ fn test_batch_charge_not_due_only_emits_no_skips_summary() {
     assert!(
         find_batch_charge_skips(&env).is_none(),
         "a not-due-only batch must stay silent"
+    );
+}
+
+/// An allowance shortfall is a per-user `AllowanceInsufficient` result (it does
+/// not abort the batch) and is an interesting failure: it alone must emit the
+/// summary, since a keeper needs to know a subscriber has to re-approve.
+#[test]
+fn test_batch_charge_allowance_insufficient_counted_in_skips_summary() {
+    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let interval: u64 = 86400;
+
+    let ok_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let broke_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+
+    // One stroop short of the gross subscription amount.
+    token.approve(&broke_user, &contract_id, &(1_0000000 - 1), &200000);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(ok_user.clone());
+    users.push_back(broke_user.clone());
+
+    let results = client.batch_charge(&users);
+    assert_eq!(results.get(0).unwrap(), ChargeResult::Charged);
+    assert_eq!(
+        results.get(1).unwrap(),
+        ChargeResult::AllowanceInsufficient
+    );
+
+    let summary = find_batch_charge_skips(&env).expect("expected a batch_charge_skips event");
+    assert_eq!(summary.total, 2);
+    assert_eq!(summary.charged, 1);
+    assert_eq!(summary.allowance_insufficient, 1);
+    assert_eq!(summary.not_due, 0);
+    assert_eq!(
+        summary.charged
+            + summary.not_due
+            + summary.paused
+            + summary.inactive
+            + summary.grace_elapsed
+            + summary.no_subscription
+            + summary.allowance_insufficient,
+        summary.total
     );
 }
 
