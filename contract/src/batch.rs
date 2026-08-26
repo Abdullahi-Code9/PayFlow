@@ -1,6 +1,8 @@
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
 use crate::charge_exec;
+use crate::events;
+use crate::events::BatchChargeSkipsEventData;
 use crate::grace;
 use crate::{DataKey, Subscription};
 // sync trigger
@@ -65,6 +67,17 @@ pub(crate) fn get_max_batch_size(env: &Env) -> u32 {
 ///
 /// Individual failures do **not** abort the batch — every address is
 /// processed and its outcome is recorded in the returned `Vec`.
+///
+/// When the batch contains at least one *interesting* non-success outcome
+/// (`NoSubscription`, `Inactive`, `Paused`, `GracePeriodElapsed`), a single
+/// `batch_charge_skips` summary event is emitted so event-driven consumers can
+/// see it without reading the return value. Not-due skips alone do not trigger
+/// it. See the design note in `events.rs`.
+///
+/// Note for auditors/integrators: an insufficient allowance is *not* one of
+/// these outcomes — it aborts the whole invocation atomically (see the
+/// gross-allowance preflight in `fee.rs`), so no partial batch is ever
+/// committed and no event is emitted for it.
 pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
     let mut results: Vec<ChargeResult> = Vec::new(env);
 
@@ -75,6 +88,13 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
 
     let now = env.ledger().timestamp();
     let grace_period = grace::get_grace_period(env);
+
+    let mut charged = 0u32;
+    let mut not_due = 0u32;
+    let mut no_subscription = 0u32;
+    let mut inactive = 0u32;
+    let mut paused = 0u32;
+    let mut grace_elapsed = 0u32;
 
     for user in users.iter() {
         let key = DataKey::Subscription(user.clone());
@@ -97,7 +117,34 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
             }
         };
 
+        match result {
+            ChargeResult::Charged => charged += 1,
+            ChargeResult::Skipped => not_due += 1,
+            ChargeResult::NoSubscription => no_subscription += 1,
+            ChargeResult::Inactive => inactive += 1,
+            ChargeResult::Paused => paused += 1,
+            ChargeResult::GracePeriodElapsed => grace_elapsed += 1,
+        }
+
         results.push_back(result);
+    }
+
+    // Only interesting failures are worth an event; a batch that merely wasn't
+    // due yet stays silent.
+    if no_subscription + inactive + paused + grace_elapsed > 0 {
+        events::publish_batch_charge_skips(
+            env,
+            BatchChargeSkipsEventData {
+                total: users.len(),
+                charged,
+                not_due,
+                no_subscription,
+                inactive,
+                paused,
+                grace_elapsed,
+                ledger_sequence: env.ledger().sequence(),
+            },
+        );
     }
 
     results

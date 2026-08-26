@@ -9079,3 +9079,214 @@ fn test_global_volume_cap_breach_still_reports_28() {
         check_and_update_global_volume(&env, GLOBAL_MAX_VOLUME_PER_HOUR + 1);
     });
 }
+
+// ─────────────────────────────────────────────
+// CONTRACT-805: batch_charge_skips summary event
+// ─────────────────────────────────────────────
+
+/// Helper: returns the payload of the single `batch_charge_skips` event in the
+/// event log, or `None` when no such event was emitted.
+fn find_batch_charge_skips(env: &Env) -> Option<crate::events::BatchChargeSkipsEventData> {
+    let mut found = None;
+    for (_, topics, data) in env.events().all().iter() {
+        let topic_symbol: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
+        if topic_symbol == Symbol::new(env, "batch_charge_skips") {
+            assert_eq!(
+                topics.len(),
+                1,
+                "batch_charge_skips carries no address topic"
+            );
+            assert!(
+                found.is_none(),
+                "at most one summary event per batch_charge call"
+            );
+            found = Some(data.try_into_val(env).unwrap());
+        }
+    }
+    found
+}
+
+/// Helper: funds a fresh user and subscribes them for `interval`.
+fn subscribe_funded_user(
+    env: &Env,
+    contract_id: &Address,
+    token_addr: &Address,
+    merchant: &Address,
+    interval: u64,
+) -> Address {
+    let client = FlowPayClient::new(env, contract_id);
+    let user = Address::generate(env);
+    let sac = StellarAssetClient::new(env, token_addr);
+    sac.mint(&user, &10_000_0000000);
+    let token = TokenClient::new(env, token_addr);
+    token.approve(&user, contract_id, &10_000_0000000, &200000);
+    client.subscribe(
+        &user,
+        merchant,
+        &1_0000000,
+        &interval,
+        token_addr,
+        &None,
+        &None,
+    );
+    user
+}
+
+/// A batch mixing charges with paused / cancelled / missing / grace-elapsed
+/// subscriptions emits one summary event whose counts reconcile with the
+/// returned results.
+#[test]
+fn test_batch_charge_emits_skips_summary_with_counts() {
+    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let interval: u64 = 86400;
+
+    install_admin(&env, &contract_id);
+    client.propose_grace_period(&3600);
+    client.commit_grace_period();
+
+    let paused_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let cancelled_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let grace_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let unknown_user = Address::generate(&env);
+
+    client.pause(&paused_user);
+    client.cancel(&cancelled_user);
+
+    // Push grace_user past its interval AND its grace window.
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 3601 + 1;
+    });
+
+    // Subscribe the chargeable user now, then advance just past its interval so
+    // it is due but still inside the grace window.
+    let chargeable = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(chargeable.clone());
+    users.push_back(paused_user.clone());
+    users.push_back(cancelled_user.clone());
+    users.push_back(grace_user.clone());
+    users.push_back(unknown_user.clone());
+
+    let results = client.batch_charge(&users);
+    assert_eq!(results.get(0).unwrap(), ChargeResult::Charged);
+    assert_eq!(results.get(1).unwrap(), ChargeResult::Paused);
+    assert_eq!(results.get(2).unwrap(), ChargeResult::Inactive);
+    assert_eq!(results.get(3).unwrap(), ChargeResult::GracePeriodElapsed);
+    assert_eq!(results.get(4).unwrap(), ChargeResult::NoSubscription);
+
+    let summary = find_batch_charge_skips(&env).expect("expected a batch_charge_skips event");
+    assert_eq!(summary.total, 5);
+    assert_eq!(summary.charged, 1);
+    assert_eq!(summary.not_due, 0);
+    assert_eq!(summary.paused, 1);
+    assert_eq!(summary.inactive, 1);
+    assert_eq!(summary.grace_elapsed, 1);
+    assert_eq!(summary.no_subscription, 1);
+    assert_eq!(summary.ledger_sequence, env.ledger().sequence());
+
+    // The counts must account for every submitted address.
+    assert_eq!(
+        summary.charged
+            + summary.not_due
+            + summary.paused
+            + summary.inactive
+            + summary.grace_elapsed
+            + summary.no_subscription,
+        summary.total
+    );
+}
+
+/// An all-success batch must not emit the summary — and its `charged` events
+/// are unchanged.
+#[test]
+fn test_batch_charge_all_charged_emits_no_skips_summary() {
+    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let interval: u64 = 86400;
+
+    let user_a = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let user_b = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user_a.clone());
+    users.push_back(user_b.clone());
+
+    let results = client.batch_charge(&users);
+    assert_eq!(results.get(0).unwrap(), ChargeResult::Charged);
+    assert_eq!(results.get(1).unwrap(), ChargeResult::Charged);
+
+    assert!(
+        find_batch_charge_skips(&env).is_none(),
+        "an all-charged batch must stay silent"
+    );
+
+    // `charged` events are untouched by this feature.
+    let charged_events = env
+        .events()
+        .all()
+        .iter()
+        .filter(|(_, topics, _)| {
+            let s: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            s == Symbol::new(&env, "charged")
+        })
+        .count();
+    assert_eq!(charged_events, 2);
+}
+
+/// Not-due skips are the common, uninteresting outcome and must not emit.
+#[test]
+fn test_batch_charge_not_due_only_emits_no_skips_summary() {
+    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let interval: u64 = 86400;
+
+    let user_a = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let user_b = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(user_a.clone());
+    users.push_back(user_b.clone());
+
+    let results = client.batch_charge(&users);
+    assert_eq!(results.get(0).unwrap(), ChargeResult::Skipped);
+    assert_eq!(results.get(1).unwrap(), ChargeResult::Skipped);
+
+    assert!(
+        find_batch_charge_skips(&env).is_none(),
+        "a not-due-only batch must stay silent"
+    );
+}
+
+/// A single interesting failure alongside not-due skips is enough to emit,
+/// and the not-due count rides along for reconciliation.
+#[test]
+fn test_batch_charge_single_interesting_failure_emits_with_not_due_count() {
+    let (env, contract_id, token_addr, _user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let interval: u64 = 86400;
+
+    let not_due_user = subscribe_funded_user(&env, &contract_id, &token_addr, &merchant, interval);
+    let unknown_user = Address::generate(&env);
+
+    let mut users = soroban_sdk::Vec::new(&env);
+    users.push_back(not_due_user.clone());
+    users.push_back(unknown_user.clone());
+
+    client.batch_charge(&users);
+
+    let summary = find_batch_charge_skips(&env).expect("expected a batch_charge_skips event");
+    assert_eq!(summary.total, 2);
+    assert_eq!(summary.not_due, 1);
+    assert_eq!(summary.no_subscription, 1);
+    assert_eq!(summary.charged, 0);
+}
+

@@ -4,7 +4,7 @@ This document provides a complete reference for all events emitted by the FlowPa
 
 > **Building on these events?** This file is the payload/schema reference. For polling Soroban RPC, deduplication, reaction patterns (keeper / analytics / notifications / reconciliation), ordering, and reliability, see the companion cookbook: [`docs/EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md). Reference scripts: [`scripts/watch-events.ts`](../scripts/watch-events.ts), [`scripts/replay-events.ts`](../scripts/replay-events.ts).
 
-> **Catalog version:** Synchronized with `contract/src/events.rs` as of 2026-08-25. All 38 `publish_*` helpers are documented below.
+> **Catalog version:** Synchronized with `contract/src/events.rs` as of 2026-08-26. All 39 `publish_*` helpers are documented below.
 
 ---
 
@@ -198,6 +198,48 @@ Events related to charges and payments.
     }
   }
   ```
+
+### batch_charge_skips
+- **Trigger**: `batch_charge()` — **only** when the batch contained at least one *interesting* non-success outcome (`NoSubscription`, `Inactive`, `Paused`, `GracePeriodElapsed`). An all-charged or all-not-due batch emits nothing.
+- **Topic keys**: `["batch_charge_skips"]` — batch-level, so there is **no address topic**
+- **Payload schema**:
+  ```rust
+  {
+    total: u32,            // addresses submitted
+    charged: u32,          // ChargeResult::Charged
+    not_due: u32,          // ChargeResult::Skipped (interval not elapsed)
+    no_subscription: u32,  // ChargeResult::NoSubscription
+    inactive: u32,         // ChargeResult::Inactive
+    paused: u32,           // ChargeResult::Paused
+    grace_elapsed: u32,    // ChargeResult::GracePeriodElapsed
+    ledger_sequence: u32
+  }
+  ```
+- **JSON example**:
+  ```json
+  {
+    "topic": ["batch_charge_skips"],
+    "data": {
+      "total": 5,
+      "charged": 1,
+      "not_due": 0,
+      "no_subscription": 1,
+      "inactive": 1,
+      "paused": 1,
+      "grace_elapsed": 1,
+      "ledger_sequence": 12345
+    }
+  }
+  ```
+
+**Parser note for indexers**
+
+- `charged` is **unchanged**; this event is purely additive. Consumers that ignore unknown event names keep working.
+- The topic tuple has length 1. Parsers that assume `topic[1]` is a subscriber address (as [`scripts/indexer.ts`](../scripts/indexer.ts) does) will store an empty `address` for this row — that is correct, not a parse failure. Do not drop the event for a missing `topic[1]`.
+- Counts reconcile: `charged + not_due + no_subscription + inactive + paused + grace_elapsed == total`. Use this to detect a truncated or mis-decoded payload.
+- **Per-user attribution is deliberately not in the event.** One summary per batch keeps event fees and ledger footprint flat in batch size, rather than growing one event per skipped address. To identify *which* subscribers were skipped, read the `batch_charge` return value, or call `get_batch_charge_estimate(users)` — it returns the same per-address `ChargeResult` vector without mutating state.
+- **Allowance failures never appear here.** An insufficient allowance aborts the whole `batch_charge` invocation atomically (the gross-allowance preflight in `fee.rs`), so no partial batch and no event are committed. Monitor those via transaction failure with error `8 InsufficientAllowance`, not via this event.
+- **Instruction impact:** measured on an 11-address batch (10 charged, 1 skipped): **+39,515 CPU instructions and +13,262 memory bytes** versus the same batch without the event — a flat per-batch cost, paid only when the event actually fires.
 
 ### pay_per_use
 - **Trigger**: `pay_per_use()` or `pay_per_use_to()`
