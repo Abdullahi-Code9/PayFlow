@@ -1982,10 +1982,41 @@ fn test_cancel_and_refund_prorated_transfers_expected_amount() {
 }
 
 #[test]
-fn test_cancel_and_refund_prorated_at_interval_end_transfers_nothing() {
+fn test_cancel_and_refund_prorated_at_period_start_refunds_full_amount() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
     let token = TokenClient::new(&env, &token_addr);
+    let sac = StellarAssetClient::new(&env, &token_addr);
+
+    sac.mint(&merchant, &10_000_0000000);
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    let merchant_balance_before = token.balance(&merchant);
+    let user_balance_before = token.balance(&user);
+
+    client.cancel_and_refund_prorated(&user, &merchant);
+
+    assert_eq!(
+        token.balance(&merchant),
+        merchant_balance_before - 1_0000000
+    );
+    assert_eq!(token.balance(&user), user_balance_before + 1_0000000);
+    assert!(!client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #36)")]
+fn test_cancel_and_refund_prorated_at_interval_end_rejects_zero_refund() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
     let sac = StellarAssetClient::new(&env, &token_addr);
 
     sac.mint(&merchant, &10_000_0000000);
@@ -2004,25 +2035,109 @@ fn test_cancel_and_refund_prorated_at_interval_end_transfers_nothing() {
         l.timestamp = 3600;
     });
 
-    let merchant_balance_before = token.balance(&merchant);
-    let user_balance_before = token.balance(&user);
-
     client.cancel_and_refund_prorated(&user, &merchant);
-
-    assert_eq!(token.balance(&merchant), merchant_balance_before);
-    assert_eq!(token.balance(&user), user_balance_before);
-
-    let sub = client.get_subscription(&user).unwrap();
-    assert!(!sub.active);
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Error(Contract, #35)")]
+fn test_cancel_and_refund_prorated_rejects_wrong_merchant() {
+    let (env, contract_id, _token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let actual_merchant = Address::generate(&env);
+
+    client.subscribe(
+        &user,
+        &actual_merchant,
+        &1_0000000,
+        &3600,
+        &_token_addr,
+        &None,
+        &None,
+    );
+
+    client.cancel_and_refund_prorated(&user, &merchant);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_cancel_and_refund_prorated_missing_subscription_panics() {
     let (env, contract_id, _token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
 
     client.cancel_and_refund_prorated(&user, &merchant);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_underfunded_merchant_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    env.ledger().with_mut(|l| l.timestamp = 1800);
+
+    let merchant_balance_before = token.balance(&merchant);
+    let user_balance_before = token.balance(&user);
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    assert_eq!(token.balance(&merchant), merchant_balance_before);
+    assert_eq!(token.balance(&user), user_balance_before);
+    assert!(client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_inactive_subscription_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.cancel(&user);
+
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    assert!(!client.get_subscription(&user).unwrap().active);
+}
+
+#[test]
+fn test_cancel_and_refund_prorated_paused_subscription_is_atomic() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &3600,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.pause(&user);
+
+    let result = client.try_cancel_and_refund_prorated(&user, &merchant);
+
+    assert!(result.is_err());
+    let sub = client.get_subscription(&user).unwrap();
+    assert!(sub.active);
+    assert!(sub.paused);
 }
 
 #[test]
