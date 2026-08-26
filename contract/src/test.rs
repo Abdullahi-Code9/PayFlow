@@ -443,6 +443,203 @@ fn test_charge_routes_net_to_custom_recipient() {
     assert_eq!(token.balance(&collector) - collector_before, 0);
 }
 
+// ─────────────────────────────────────────────
+// CONTRACT-802: gross-allowance preflight before the two-leg fee transfer
+// ─────────────────────────────────────────────
+
+/// Helper: installs an admin and commits `bps` with a fresh collector.
+fn configure_fee(env: &Env, contract_id: &Address, bps: u32) -> Address {
+    let client = FlowPayClient::new(env, contract_id);
+    install_admin(env, contract_id);
+    let collector = Address::generate(env);
+    client.propose_fee(&collector, &bps);
+    client.commit_fee();
+    collector
+}
+
+/// An allowance exactly equal to the gross amount must cover BOTH transfer
+/// legs (fee + net) when fee_bps > 0.
+#[test]
+fn test_charge_exact_gross_allowance_succeeds_with_fee() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 500); // 5%
+
+    let amount: i128 = 10_0000000;
+    let expected_fee: i128 = 500_0000;
+    let interval: u64 = 86400;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    // Tighten the allowance to exactly the gross amount — not a stroop more.
+    token.approve(&user, &contract_id, &amount, &200000);
+    assert_eq!(token.allowance(&user, &contract_id), amount);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    client.charge(&user);
+
+    assert_eq!(token.balance(&collector), expected_fee);
+    assert_eq!(token.balance(&merchant), amount - expected_fee);
+    // Both legs drew on the same allowance, consuming it exactly.
+    assert_eq!(token.allowance(&user, &contract_id), 0);
+}
+
+/// One stroop short of the gross amount must fail closed with the typed
+/// `InsufficientAllowance` (#8) and move no funds on either leg.
+#[test]
+fn test_charge_allowance_below_gross_fails_closed_before_any_transfer() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 500); // 5%
+
+    let amount: i128 = 10_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    token.approve(&user, &contract_id, &(amount - 1), &200000);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    let res = client.try_charge(&user);
+
+    assert_eq!(res, Err(Ok(soroban_sdk::Error::from_contract_error(8))));
+    // Neither leg ran: the fee leg alone would have fit in the allowance.
+    assert_eq!(token.balance(&collector), 0);
+    assert_eq!(token.balance(&merchant), 0);
+    assert_eq!(client.get_total_protocol_fees(), 0);
+}
+
+/// A fee that rounds down to zero still charges the full gross amount and
+/// needs the full gross allowance.
+#[test]
+fn test_charge_with_fee_rounding_to_zero_uses_full_gross_allowance() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 500); // 5%
+
+    // 1 * 500 / 10_000 == 0 — the fee leg is skipped entirely.
+    let amount: i128 = 1;
+    let interval: u64 = 86400;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    token.approve(&user, &contract_id, &amount, &200000);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    client.charge(&user);
+
+    assert_eq!(token.balance(&collector), 0);
+    assert_eq!(token.balance(&merchant), amount);
+    assert_eq!(client.get_total_protocol_fees(), 0);
+}
+
+/// The maximum in-bounds fee (10_000 bps == 100%) sends everything to the
+/// collector and still passes the single gross preflight.
+#[test]
+fn test_charge_max_bps_exact_allowance_succeeds() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 10_000); // 100%
+
+    let amount: i128 = 10_0000000;
+    let interval: u64 = 86400;
+
+    client.subscribe(
+        &user,
+        &merchant,
+        &amount,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    token.approve(&user, &contract_id, &amount, &200000);
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+    client.charge(&user);
+
+    assert_eq!(token.balance(&collector), amount);
+    assert_eq!(token.balance(&merchant), 0);
+    assert_eq!(token.allowance(&user, &contract_id), 0);
+}
+
+/// pay_per_use runs the same two-leg pattern and the same preflight.
+#[test]
+fn test_pay_per_use_exact_gross_allowance_succeeds_with_fee() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 500); // 5%
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    let amount: i128 = 10_0000000;
+    let expected_fee: i128 = 500_0000;
+    token.approve(&user, &contract_id, &amount, &200000);
+
+    client.pay_per_use(&user, &amount);
+
+    assert_eq!(token.balance(&collector), expected_fee);
+    assert_eq!(token.balance(&merchant), amount - expected_fee);
+    assert_eq!(token.allowance(&user, &contract_id), 0);
+}
+
+#[test]
+fn test_pay_per_use_allowance_below_gross_fails_closed() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let token = TokenClient::new(&env, &token_addr);
+    let collector = configure_fee(&env, &contract_id, 500); // 5%
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    let amount: i128 = 10_0000000;
+    token.approve(&user, &contract_id, &(amount - 1), &200000);
+
+    let res = client.try_pay_per_use(&user, &amount);
+
+    assert_eq!(res, Err(Ok(soroban_sdk::Error::from_contract_error(8))));
+    assert_eq!(token.balance(&collector), 0);
+    assert_eq!(client.get_total_protocol_fees(), 0);
+}
+
 // Note: setter input validation is covered in contract code; invoking it directly
 // via the generated client isn't available in these tests. The storage-level
 // behavior for routing is covered by the tests above.

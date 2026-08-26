@@ -1,5 +1,6 @@
 use soroban_sdk::{token, Address, Env};
 
+use crate::validation;
 use crate::{errors::ContractError, DataKey, Subscription};
 
 /// Retrieves the fee collector address from instance storage.
@@ -120,9 +121,37 @@ fn accumulate_protocol_fees(env: &Env, amount: i128) {
         .set(&DataKey::TotalProtocolFees, &(total + amount));
 }
 
+// ─────────────────────────────────────────────────────────────
+// Auditor note: the two-leg transfer model
+// ─────────────────────────────────────────────────────────────
+//
+// When a protocol fee is configured, the helpers below pull funds from the
+// payer in TWO `transfer_from` legs against the SAME allowance:
+//
+//   leg 1: user -> fee collector   (fee  = gross * bps / 10_000)
+//   leg 2: user -> merchant        (net  = gross - fee)
+//
+// Invariant: `allowance >= gross` (the sum of both legs) is asserted ONCE,
+// up front, before either leg runs. `fee + net == gross` by construction, so
+// a passing preflight covers both legs; there is no window in which leg 1
+// succeeds against an allowance that cannot also cover leg 2.
+//
+// Atomicity: Soroban aborts the whole invocation on any host error, so a
+// failing leg 2 rolls back leg 1 and the `TotalProtocolFees` bump together —
+// the ledger never observes a half-applied charge. The preflight therefore
+// does not add safety the host lacks; it makes the invariant explicit and
+// converts a token-contract error into the typed `InsufficientAllowance`
+// (error #8) that clients and alerting already map.
+
 /// Transfers subscription charge amounts (fee to collector/merchant fee recipient, net to merchant).
 /// Returns the fee amount deducted from the gross subscription amount.
+///
+/// Panics with `InsufficientAllowance` when the contract's allowance over
+/// `user`'s tokens is below the **gross** `sub.amount`, before any transfer runs.
 pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscription) -> i128 {
+    // Preflight: one allowance check covering both legs (fee + net == gross).
+    validation::check_allowance(env, user, &sub.token, sub.amount);
+
     let bps = get_fee_bps(env);
     let fee_collector = get_merchant_fee_recipient(env, &sub.merchant)
         .or_else(|| get_fee_collector(env));
@@ -149,6 +178,10 @@ pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscriptio
 
 /// Transfers a pay-per-use amount (fee to collector/merchant fee recipient, net to `recipient`).
 /// Returns the fee amount deducted from the gross amount.
+///
+/// Panics with `InsufficientAllowance` when the contract's allowance over
+/// `user`'s tokens is below the **gross** `amount`, before any transfer runs.
+/// See the two-leg atomicity note above.
 pub fn transfer_pay_per_use(
     env: &Env,
     user: &Address,
@@ -156,6 +189,9 @@ pub fn transfer_pay_per_use(
     amount: i128,
     recipient: &Address,
 ) -> i128 {
+    // Preflight: one allowance check covering both legs (fee + net == gross).
+    validation::check_allowance(env, user, token, amount);
+
     let bps = get_fee_bps(env);
     let fee_collector = get_merchant_fee_recipient(env, recipient)
         .or_else(|| get_fee_collector(env));

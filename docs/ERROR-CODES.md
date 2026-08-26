@@ -175,8 +175,15 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 | Field               | Detail                                                               |
 | ------------------- | -------------------------------------------------------------------- |
-| **When it occurs**  | Charge or subscribe path finds token allowance below required amount |
+| **When it occurs**  | Charge, subscribe, or pay-per-use path finds token allowance below required amount |
 | **Immediate cause** | SAC `allowance(user → FlowPay)` is too low or spent down             |
+
+`charge()` / `batch_charge()` / `pay_per_use*()` preflight the allowance against
+the **gross** amount before any transfer runs. When a protocol fee is
+configured the charge is pulled in two legs (fee → collector, net → merchant)
+against that same allowance, so an allowance covering only the fee leg is
+rejected up front rather than part-way through. Budget for `amount`, not
+`amount - fee`.
 
 **Recovery steps**
 
