@@ -5634,6 +5634,47 @@ fn test_transfer_subscription_succeeds() {
     assert!(new_sub.active, "new subscription should be active");
     assert_eq!(new_sub.merchant, merchant);
     assert_eq!(new_sub.amount, 1_0000000);
+    assert_eq!(client.get_subscriber_count(), 2);
+    assert_eq!(client.get_subscriber_at(&0u64), None);
+    assert_eq!(client.get_subscriber_at(&1u64), Some(new_user));
+    assert_eq!(client.get_merchant_sub_count(&merchant), 1);
+}
+
+#[test]
+fn test_transfer_subscription_to_inactive_user_reuses_tombstone_membership() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let new_user = setup_funded_user(&env, &contract_id, &token_addr);
+    let inactive_merchant = Address::generate(&env);
+
+    client.subscribe(
+        &new_user,
+        &inactive_merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+    client.cancel(&new_user);
+    client.subscribe(
+        &user,
+        &merchant,
+        &1_0000000,
+        &86400,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    client.transfer_subscription(&user, &new_user);
+
+    assert_eq!(client.get_merchant_sub_count(&merchant), 1);
+    assert_eq!(client.get_merchant_sub_count(&inactive_merchant), 0);
+    assert_eq!(client.get_subscriber_count(), 3);
+    let page = client.get_subscriber_page(&0u64, &10u32);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap(), new_user);
 }
 
 #[test]
