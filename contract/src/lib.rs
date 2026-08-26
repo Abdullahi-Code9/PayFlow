@@ -1866,6 +1866,7 @@ impl FlowPay {
         env.storage().persistent().set(&new_key, &sub);
         env.storage().persistent().remove(&old_key);
 
+        subscription_count::transfer_subscriber_index(&env, &user, &new_user);
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
