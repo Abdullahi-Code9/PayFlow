@@ -120,6 +120,8 @@ pub enum DataKey {
     // Feature: configurable min/max fee bps bounds
     MinFeeBps,
     MaxFeeBps,
+    // Feature: configurable whitelist batch size limit override
+    MaxWhitelistBatchSize,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -128,7 +130,13 @@ pub enum DataKey {
 
 pub const SUBSCRIPTION_TTL_LEDGERS: u32 = 6307200; // ~1 year (assuming 5s blocks)
 pub const MAX_BATCH_PAUSE_SUBSCRIPTIONS: u32 = 25;
+/// Default cap for the admin whitelist batch entrypoints. Overridable at
+/// runtime via `set_max_whitelist_batch_size`, bounded by `MAX_BATCH_SIZE_CEILING`.
 pub const MAX_WHITELIST_BATCH_SIZE: u32 = 50;
+/// Hard ceiling shared by every admin-configurable batch limit. Configured
+/// limits are never allowed above this value, so batches stay bounded even if
+/// an admin key is compromised.
+pub const MAX_BATCH_SIZE_CEILING: u32 = 200;
 pub const GLOBAL_MAX_VOLUME_PER_HOUR: i128 = 50_000_000_000_000; // 50 trillion stroops
 pub const HOUR_IN_SECONDS: u64 = 3600;
 pub const MAX_AMOUNT: i128 = 100_000_000_000;
@@ -265,10 +273,29 @@ impl FlowPay {
 
     pub fn set_max_batch_size(env: Env, size: u32) {
         admin::require_admin(&env);
-        if size > 200 {
+        if size > MAX_BATCH_SIZE_CEILING {
             env.panic_with_error(ContractError::InvalidBatchSize);
         }
         env.storage().instance().set(&DataKey::MaxBatchSize, &size);
+    }
+
+    /// Returns the batch cap applied to the admin whitelist batch entrypoints
+    /// (`whitelist_batch_add`, `whitelist_batch_remove`, `get_merchant_statuses`).
+    ///
+    /// This is a **separate** knob from `get_max_batch_size`, which bounds the
+    /// charge batches — see the design note in `whitelist.rs`. Defaults to
+    /// `MAX_WHITELIST_BATCH_SIZE` (50).
+    pub fn get_max_whitelist_batch_size(env: Env) -> u32 {
+        whitelist::get_max_whitelist_batch_size(&env)
+    }
+
+    /// Admin-only: overrides the whitelist batch cap.
+    ///
+    /// Panics with `InvalidBatchSize` when `size` is zero or exceeds
+    /// `MAX_BATCH_SIZE_CEILING` (200), so whitelist batches always stay bounded.
+    pub fn set_max_whitelist_batch_size(env: Env, size: u32) {
+        admin::require_admin(&env);
+        whitelist::set_max_whitelist_batch_size(&env, size);
     }
 
     pub fn get_contract_config(env: Env) -> ContractConfig {
@@ -609,6 +636,7 @@ impl FlowPay {
     /// - If `additional_seconds` is 0 (`IntervalMustBePositive`).
     /// - If the subscription is cancelled/inactive (`SubscriptionInactive`).
     /// - If the subscription doesn't exist (`NoSubscriptionFound`).
+    /// - If `last_charged + additional_seconds` overflows `u64` (`ArithmeticOverflow`).
     pub fn extend_trial(env: Env, user: Address, additional_seconds: u64) {
         bump_instance_ttl(&env);
         user.require_auth();
@@ -1134,15 +1162,16 @@ impl FlowPay {
     }
 
     /// Adds multiple merchants to the whitelist in a single call.
-    /// Admin-only. Capped at 50 entries; duplicates are idempotent.
+    /// Admin-only. Duplicates are idempotent.
     /// Returns the number of entries processed.
+    ///
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50); panics with
+    /// `BatchTooLarge` above it.
     pub fn whitelist_batch_add(env: Env, merchants: Vec<Address>) -> u32 {
         admin::require_admin(&env);
 
-        // TODO: use configurable limit (see CONTRACT-16) once merged
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
 
         for merchant in merchants.iter() {
             whitelist::add_merchant(&env, &merchant);
@@ -1152,15 +1181,16 @@ impl FlowPay {
     }
 
     /// Removes multiple merchants from the whitelist in a single call.
-    /// Admin-only. Capped at 50 entries; removing a non-whitelisted merchant is a no-op.
+    /// Admin-only. Removing a non-whitelisted merchant is a no-op.
     /// Returns the number of entries processed.
+    ///
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50); panics with
+    /// `BatchTooLarge` above it.
     pub fn whitelist_batch_remove(env: Env, merchants: Vec<Address>) -> u32 {
         admin::require_admin(&env);
 
-        // TODO: use configurable limit (see CONTRACT-16) once merged
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
 
         for merchant in merchants.iter() {
             whitelist::remove_merchant(&env, &merchant);
@@ -1202,11 +1232,11 @@ impl FlowPay {
     }
 
     /// Returns the whitelist and freeze status for a batch of merchant addresses.
-    /// Capped at MAX_WHITELIST_BATCH_SIZE (50) per call.
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50) so the read path and the
+    /// admin write paths share one number.
     pub fn get_merchant_statuses(env: Env, merchants: Vec<Address>) -> Vec<(Address, bool, bool)> {
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
         let mut result = Vec::new(&env);
         for merchant in merchants.iter() {
             let whitelisted = whitelist::is_whitelisted(&env, &merchant);
@@ -2234,15 +2264,26 @@ pub(crate) fn check_and_update_global_volume(env: &Env, amount: i128) {
             accumulated_volume: 0,
         });
 
-    if now >= window.current_window_start + HOUR_IN_SECONDS {
+    // Checked: a window start near u64::MAX must not wrap the rollover test
+    // into an accidental (or permanently suppressed) window reset.
+    let window_end = window
+        .current_window_start
+        .checked_add(HOUR_IN_SECONDS)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
+
+    if now >= window_end {
         window.current_window_start = now;
         window.accumulated_volume = 0;
     }
 
+    // Overflow and cap breach are distinct failure modes: an accumulator that
+    // cannot represent the sum is a typed `ArithmeticOverflow`, not a policy
+    // rejection, so clients can tell "the protocol is at its hourly cap" from
+    // "this amount is not representable".
     let new_volume = window
         .accumulated_volume
         .checked_add(amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::GlobalVolumeExceeded));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
 
     if new_volume > GLOBAL_MAX_VOLUME_PER_HOUR {
         env.panic_with_error(ContractError::GlobalVolumeExceeded);

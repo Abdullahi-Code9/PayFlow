@@ -48,6 +48,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 | 33   | `InvalidVolumeCap`          | Validation   | Volume cap override not positive   |
 | 34   | `InvalidFeeBounds`          | Validation   | Fee bounds min/max invalid         |
 | 35   | `FeeOutOfBoundsAtCommit`    | Validation   | Pending fee outside bounds         |
+| 36   | `ArithmeticOverflow`        | State        | Checked arithmetic would overflow  |
 
 > **Note:** Code `31` is intentionally unused. Source of truth: [`contract/src/errors.rs`](../contract/src/errors.rs).
 
@@ -178,8 +179,18 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 | Field               | Detail                                                               |
 | ------------------- | -------------------------------------------------------------------- |
-| **When it occurs**  | Charge or subscribe path finds token allowance below required amount |
+| **When it occurs**  | Charge, subscribe, or pay-per-use path finds token allowance below required amount |
 | **Immediate cause** | SAC `allowance(user → FlowPay)` is too low or spent down             |
+
+`charge()` and `pay_per_use*()` preflight the allowance against the **gross**
+amount before any transfer runs. When a protocol fee is configured the charge
+is pulled in two legs (fee → collector, net → merchant) against that same
+allowance, so an allowance covering only the fee leg is rejected up front
+rather than part-way through. Budget for `amount`, not `amount - fee`.
+
+`batch_charge()` does **not** raise this error: it records
+`ChargeResult::AllowanceInsufficient` for that subscriber and continues the
+batch. See [`EVENTS.md`](EVENTS.md#batch_charge_skips).
 
 **Recovery steps**
 
@@ -621,12 +632,34 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 ---
 
+### 36 — `ArithmeticOverflow`
+
+| Field               | Detail                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **When it occurs**  | A checked operation would leave range: trial extension, fee multiplication, protocol-fee accrual, or global volume accumulation |
+| **Immediate cause** | Inputs or accumulated state near the type's limit (`u64::MAX`, `i128::MAX`)                                  |
+
+**Recovery steps**
+
+1. Do not retry unchanged — the same inputs overflow deterministically.
+2. Shrink the offending input (e.g. a smaller `additional_seconds` on `extend_trial`, a smaller amount).
+3. If the overflow came from accumulated protocol state rather than the call's
+   inputs, escalate: the counter, not the caller, is at its limit.
+
+**Distinct from `28 GlobalVolumeExceeded`:** #28 means the protocol is at its
+hourly volume cap (a policy decision, retry next window); #36 means the value
+is not representable at all.
+
+**Prevention:** Bound amounts and durations client-side against the documented caps.
+
+---
+
 ## Error Categories
 
 | Category       | Codes                                    | Typical owners                |
 | -------------- | ---------------------------------------- | ----------------------------- |
 | Auth / access  | 8, 10, 22                                | User + admin                  |
-| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30   | Deployer, user, admin, keeper |
+| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36 | Deployer, user, admin, keeper |
 | Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32, 33, 34, 35 | Client / admin tooling        |
 | Limit / timing | 6, 9, 15, 20, 25, 28                     | Keeper + user                 |
 
