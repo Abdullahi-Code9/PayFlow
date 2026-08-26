@@ -1040,6 +1040,139 @@ fn test_whitelist_batch_add_non_admin_panics() {
     client.whitelist_batch_add(&merchants);
 }
 
+// ─────────────────────────────────────────────
+// CONTRACT-803: configurable whitelist batch limit
+// ─────────────────────────────────────────────
+
+/// Helper: installs a generated admin so admin-gated entrypoints are callable.
+fn install_admin(env: &Env, contract_id: &Address) {
+    let admin = Address::generate(env);
+    env.as_contract(contract_id, || {
+        storage::set_admin(env, &admin);
+    });
+}
+
+/// Helper: installs an admin and returns a Vec of `n` freshly generated merchants.
+fn whitelist_admin_and_merchants(
+    env: &Env,
+    contract_id: &Address,
+    n: u32,
+) -> soroban_sdk::Vec<Address> {
+    install_admin(env, contract_id);
+
+    let mut merchants = soroban_sdk::Vec::new(env);
+    for _ in 0..n {
+        merchants.push_back(Address::generate(env));
+    }
+    merchants
+}
+
+#[test]
+fn test_max_whitelist_batch_size_defaults_to_50() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    install_admin(&env, &contract_id);
+
+    assert_eq!(client.get_max_whitelist_batch_size(), 50);
+    // The whitelist knob is independent of the charge-batch knob.
+    client.set_max_batch_size(&10);
+    assert_eq!(client.get_max_whitelist_batch_size(), 50);
+    assert_eq!(client.get_max_batch_size(), 10);
+}
+
+#[test]
+fn test_set_max_whitelist_batch_size_lowers_cap() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let merchants = whitelist_admin_and_merchants(&env, &contract_id, 2);
+
+    client.set_max_whitelist_batch_size(&2);
+    assert_eq!(client.get_max_whitelist_batch_size(), 2);
+
+    // Exactly at the configured cap still succeeds.
+    assert_eq!(client.whitelist_batch_add(&merchants), 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_whitelist_batch_add_over_configured_cap_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let merchants = whitelist_admin_and_merchants(&env, &contract_id, 3);
+
+    client.set_max_whitelist_batch_size(&2);
+    client.whitelist_batch_add(&merchants);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_whitelist_batch_remove_over_configured_cap_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let merchants = whitelist_admin_and_merchants(&env, &contract_id, 3);
+
+    client.set_max_whitelist_batch_size(&2);
+    client.whitelist_batch_remove(&merchants);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_get_merchant_statuses_over_configured_cap_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let merchants = whitelist_admin_and_merchants(&env, &contract_id, 3);
+
+    client.set_max_whitelist_batch_size(&2);
+    client.get_merchant_statuses(&merchants);
+}
+
+#[test]
+fn test_raised_whitelist_batch_cap_allows_more_than_default() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let merchants = whitelist_admin_and_merchants(&env, &contract_id, 51);
+
+    // 51 entries panic under the default cap; raising the cap admits them.
+    client.set_max_whitelist_batch_size(&60);
+    assert_eq!(client.whitelist_batch_add(&merchants), 51);
+    assert_eq!(client.get_whitelist_size(), 51);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #29)")]
+fn test_set_max_whitelist_batch_size_zero_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    install_admin(&env, &contract_id);
+
+    client.set_max_whitelist_batch_size(&0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #29)")]
+fn test_set_max_whitelist_batch_size_above_ceiling_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    install_admin(&env, &contract_id);
+
+    client.set_max_whitelist_batch_size(&(MAX_BATCH_SIZE_CEILING + 1));
+}
+
+#[test]
+#[should_panic]
+fn test_set_max_whitelist_batch_size_non_admin_panics() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        storage::set_admin(&env, &admin);
+    });
+    env.set_auths(&[]);
+
+    client.set_max_whitelist_batch_size(&10);
+}
+
 #[test]
 fn test_cancel() {
     let (env, contract_id, token_addr, user, merchant) = setup();
