@@ -732,6 +732,7 @@ Always map numeric Soroban contract errors to this document before inventing new
 ## Related
 
 - Contract source: [`contract/src/errors.rs`](../contract/src/errors.rs)
+- Troubleshooting runbook: [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 - Keeper guide: [`docs/KEEPER.md`](KEEPER.md)
 - API reference: [`docs/API.md`](API.md)
 - Security model: [`docs/SECURITY.md`](SECURITY.md)
