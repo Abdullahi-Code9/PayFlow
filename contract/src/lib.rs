@@ -616,6 +616,7 @@ impl FlowPay {
     }
 
     pub fn cancel_and_refund_prorated(env: Env, user: Address, merchant: Address) {
+        bump_instance_ttl(&env);
         user.require_auth();
         merchant.require_auth();
 
@@ -626,15 +627,37 @@ impl FlowPay {
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
+        if !sub.active {
+            env.panic_with_error(ContractError::SubscriptionInactive);
+        }
+        if sub.paused {
+            env.panic_with_error(ContractError::SubscriptionPaused);
+        }
+        if sub.merchant != merchant {
+            env.panic_with_error(ContractError::RefundMerchantMismatch);
+        }
+
         let now = env.ledger().timestamp();
         let elapsed = now.saturating_sub(sub.last_charged);
         let remaining = sub.interval.saturating_sub(elapsed);
+        if sub.interval == 0 {
+            env.panic_with_error(ContractError::IntervalMustBePositive);
+        }
         let refund = (sub.amount * i128::from(remaining)) / i128::from(sub.interval);
 
-        if refund > 0 {
-            token::Client::new(&env, &sub.token).transfer(&merchant, &user, &refund);
+        if refund <= 0 {
+            env.panic_with_error(ContractError::RefundAmountMustBePositive);
         }
 
+        // Refunds are merchant-funded; no protocol escrow is used. Validate the
+        // source balance before the transfer so an underfunded merchant cannot
+        // reach an opaque SAC failure or a partial cancellation.
+        let token_client = token::Client::new(&env, &sub.token);
+        if token_client.balance(&merchant) < refund {
+            env.panic_with_error(ContractError::InsufficientMerchantBalance);
+        }
+
+        token_client.transfer(&merchant, &user, &refund);
         cancel_inner(&env, &user);
         events::publish_cancelled_with_refund(&env, &user, refund);
     }

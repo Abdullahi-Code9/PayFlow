@@ -70,4 +70,10 @@ pub enum ContractError {
     InvalidFeeBounds = 34,
     /// Returned when a pending fee proposal violates the current fee bounds at commit time
     FeeOutOfBoundsAtCommit = 35,
+    /// Returned when a refund is requested by a merchant different from the subscription merchant
+    RefundMerchantMismatch = 38,
+    /// Returned when prorated cancellation would produce no refund
+    RefundAmountMustBePositive = 39,
+    /// Returned when the merchant cannot fund the requested refund
+    InsufficientMerchantBalance = 40,
 }
