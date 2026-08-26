@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, token, Address, Env, Vec};
 
 use crate::charge_exec;
 use crate::events;
@@ -39,6 +39,9 @@ pub enum CancelResult {
 }
 
 /// The outcome for a single user in a batch_charge call.
+///
+/// Variants are returned in-order, one per input address. A non-`Charged`
+/// result for one user never aborts processing of subsequent users.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChargeResult {
@@ -54,6 +57,11 @@ pub enum ChargeResult {
     Paused,
     /// Grace period has elapsed.
     GracePeriodElapsed,
+    /// The subscriber's token allowance granted to this contract is less than
+    /// the gross subscription amount (`sub.amount`). No funds were transferred.
+    /// The keeper should prompt the subscriber to increase their allowance and
+    /// retry on the next cycle; the subscription remains active.
+    AllowanceInsufficient,
 }
 
 pub(crate) fn get_max_batch_size(env: &Env) -> u32 {
@@ -110,8 +118,21 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
                 match charge_exec::precheck_charge(&sub, now, grace_period) {
                     Err(skip) => skip,
                     Ok(()) => {
-                        charge_exec::execute_charge(env, &user, &key, &mut sub, now);
-                        ChargeResult::Charged
+                        // Pre-check allowance against the gross subscription
+                        // amount BEFORE calling execute_charge. The SAC's
+                        // transfer_from panics when allowance is insufficient,
+                        // which would abort the whole transaction. By checking
+                        // here we convert that condition into a per-user result
+                        // so the rest of the batch continues unaffected.
+                        let token_client = token::Client::new(env, &sub.token);
+                        let allowance = token_client
+                            .allowance(&user, &env.current_contract_address());
+                        if allowance < sub.amount {
+                            ChargeResult::AllowanceInsufficient
+                        } else {
+                            charge_exec::execute_charge(env, &user, &key, &mut sub, now);
+                            ChargeResult::Charged
+                        }
                     }
                 }
             }

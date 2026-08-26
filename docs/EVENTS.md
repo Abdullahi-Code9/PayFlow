@@ -627,6 +627,8 @@ Events related to referral tracking.
   }
   ```
 
+See the canonical referral guide: [`REFERRALS.md`](./REFERRALS.md#referred-event).
+
 ---
 
 ## Migration & Infrastructure Events
