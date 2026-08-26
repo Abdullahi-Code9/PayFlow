@@ -2854,6 +2854,70 @@ fn test_get_pending_upgrade_none_after_commit() {
     assert_eq!(client.get_pending_upgrade(), None);
 }
 
+#[test]
+fn test_cancel_pending_upgrade_clears_pending_upgrade_and_emits_event() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let new_wasm_hash = BytesN::from_array(&env, &[0xEF; 32]);
+    client.propose_upgrade(&new_wasm_hash);
+    client.cancel_pending_upgrade();
+
+    assert_eq!(client.get_pending_upgrade(), None);
+    assert_last_event(&env, "upg_cancelled");
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_commit_upgrade_requires_pending_upgrade_after_cancel() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    client.propose_upgrade(&BytesN::from_array(&env, &[0xEF; 32]));
+    client.cancel_pending_upgrade();
+    client.commit_upgrade();
+}
+
+#[test]
+fn test_pending_upgrade_expires() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    client.propose_upgrade(&BytesN::from_array(&env, &[0xEF; 32]));
+    env.ledger().with_mut(|ledger| {
+        ledger.sequence_number += upgrade::PENDING_UPGRADE_TTL_LEDGERS + 1;
+    });
+
+    assert_eq!(client.get_pending_upgrade(), None);
+}
+
+#[test]
+fn test_repropose_refreshes_pending_upgrade_ttl() {
+    let (env, contract_id, token_addr, _user, _merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&token_addr, &admin);
+
+    let first_hash = BytesN::from_array(&env, &[0x01; 32]);
+    let second_hash = BytesN::from_array(&env, &[0x02; 32]);
+    client.propose_upgrade(&first_hash);
+    env.ledger().with_mut(|ledger| {
+        ledger.sequence_number += upgrade::PENDING_UPGRADE_TTL_LEDGERS - 1;
+    });
+    client.propose_upgrade(&second_hash);
+    env.ledger().with_mut(|ledger| {
+        ledger.sequence_number += upgrade::PENDING_UPGRADE_TTL_LEDGERS - 1;
+    });
+
+    assert_eq!(client.get_pending_upgrade(), Some(second_hash));
+}
+
 /// A second propose_upgrade overwrites the first pending hash.
 #[test]
 fn test_get_pending_upgrade_overwritten_by_second_proposal() {

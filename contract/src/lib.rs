@@ -841,6 +841,10 @@ impl FlowPay {
         upgrade::propose_upgrade(&env, new_wasm_hash);
     }
 
+    pub fn cancel_pending_upgrade(env: Env) {
+        upgrade::cancel_pending_upgrade(&env);
+    }
+
     pub fn commit_upgrade(env: Env) {
         upgrade::commit_upgrade(&env);
     }

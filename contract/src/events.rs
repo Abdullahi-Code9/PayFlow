@@ -196,6 +196,11 @@ pub fn publish_upgrade_proposed(env: &Env, new_wasm_hash: &BytesN<32>) {
         .publish((Symbol::new(env, "upg_proposed"),), new_wasm_hash.clone());
 }
 
+pub fn publish_upgrade_cancelled(env: &Env) {
+    env.events()
+        .publish((Symbol::new(env, "upg_cancelled"),), ());
+}
+
 pub fn publish_contract_paused(env: &Env) {
     env.events()
         .publish((Symbol::new(env, "contract_paused"),), ());
