@@ -68,6 +68,8 @@ pub enum ContractError {
     InvalidVolumeCap = 33,
     /// Returned when configured fee bounds are inconsistent (min > max, or max > 10000)
     InvalidFeeBounds = 34,
+    /// Returned when a pending fee proposal violates the current fee bounds at commit time
+    FeeOutOfBoundsAtCommit = 35,
     /// Returned when a refund is requested by a merchant different from the subscription merchant
     RefundMerchantMismatch = 38,
     /// Returned when prorated cancellation would produce no refund

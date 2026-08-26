@@ -52,12 +52,32 @@ pub fn propose_fee(env: &Env, collector: Address, bps: u32) {
 }
 
 /// Commits a pending fee proposal.
+///
+/// Re-validates the pending bps against the current fee bounds
+/// (MinFeeBps / MaxFeeBps) before committing. If the admin tightened
+/// or widened bounds between propose and commit, the commit is rejected
+/// rather than silently applying an out-of-range value.
 pub fn commit_fee(env: &Env) {
     let pending: (Address, u32) = env
         .storage()
         .temporary()
         .get(&DataKey::PendingFee)
         .unwrap_or_else(|| env.panic_with_error(ContractError::NoPendingProposal));
+
+    let min_bps: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::MinFeeBps)
+        .unwrap_or(0);
+    let max_bps: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::MaxFeeBps)
+        .unwrap_or(10_000);
+
+    if pending.1 < min_bps || pending.1 > max_bps {
+        env.panic_with_error(ContractError::FeeOutOfBoundsAtCommit);
+    }
 
     env.storage().temporary().remove(&DataKey::PendingFee);
     env.storage()

@@ -28,6 +28,10 @@ This document tracks the current public contract surface in [contract/src/lib.rs
   - [get\_admin](#get_admin)
   - [get\_token](#get_token)
   - [upgrade](#upgrade)
+  - [propose_upgrade](#propose_upgrade)
+  - [cancel_pending_upgrade](#cancel_pending_upgrade)
+  - [commit_upgrade](#commit_upgrade)
+  - [get_pending_upgrade](#get_pending_upgrade)
   - [get\_subscription](#get_subscription)
   - [next\_charge\_at](#next_charge_at)
   - [is\_charge\_due](#is_charge_due)
@@ -513,6 +517,40 @@ CLI example:
 ```bash
 soroban contract invoke --id <CONTRACT_ID> --network testnet -- upgrade --new_wasm_hash <WASM_HASH>
 ```
+
+### `propose_upgrade`
+
+```
+propose_upgrade(env: Env, new_wasm_hash: BytesN<32>)
+```
+
+Queues a WASM hash for the two-step upgrade flow. Auth: admin. The pending
+proposal is stored temporarily and refreshed to a 17,280-ledger TTL.
+
+### `cancel_pending_upgrade`
+
+```
+cancel_pending_upgrade(env: Env)
+```
+
+Clears the pending upgrade proposal. Auth: admin.
+
+### `commit_upgrade`
+
+```
+commit_upgrade(env: Env)
+```
+
+Commits the pending WASM hash and clears the proposal. Auth: admin. Panics
+with `NoPendingProposal` when the proposal was cancelled or expired.
+
+### `get_pending_upgrade`
+
+```
+get_pending_upgrade(env: Env) -> Option<BytesN<32>>
+```
+
+Returns the pending upgrade hash, or `None` when no proposal exists. Auth: none.
 
 ### `get_subscription`
 
