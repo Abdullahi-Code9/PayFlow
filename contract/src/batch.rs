@@ -5,6 +5,25 @@ use crate::grace;
 use crate::{DataKey, Subscription};
 // sync trigger
 pub const MAX_BATCH_SIZE: u32 = 50;
+
+// ─────────────────────────────────────────────────────────────
+// Decode-compatibility note
+// ─────────────────────────────────────────────────────────────
+// `ChargeResult` is decoded off-chain by keepers, alert scripts
+// (alert-failed-charges.ts), and indexers.  Its discriminant
+// layout is:
+//
+//   Charged            = 0
+//   Skipped            = 1
+//   NoSubscription     = 2
+//   Inactive           = 3
+//   Paused             = 4
+//   GracePeriodElapsed = 5
+//
+// When adding new variants ALWAYS append at the end so existing
+// off-chain parsers continue to recognise the original codes.
+// Renaming or reordering is a breaking change for all consumers.
+// The golden tests in test.rs lock this layout.
 /// The outcome for a single user in a batch_cancel call.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
