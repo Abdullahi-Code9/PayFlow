@@ -8934,3 +8934,148 @@ fn test_charge_result_partial_eq_identity() {
     assert_ne!(ChargeResult::Paused, ChargeResult::GracePeriodElapsed);
 }
 
+
+// ─────────────────────────────────────────────
+// CONTRACT-804: checked arithmetic in trial, fee, and volume paths
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_extend_trial_pushes_last_charged_forward() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+    let before = client.get_subscription(&user).unwrap().last_charged;
+
+    client.extend_trial(&user, &86400);
+
+    assert_eq!(
+        client.get_subscription(&user).unwrap().last_charged,
+        before + 86400
+    );
+}
+
+/// A trial extension past `u64::MAX` must fail closed with the typed
+/// `ArithmeticOverflow` (#36) rather than an untyped `unwrap` panic.
+#[test]
+fn test_extend_trial_overflow_fails_with_typed_error() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+
+    client.subscribe(&user, &merchant, &1000, &86400, &token_addr, &None, &None);
+
+    // Push last_charged to the u64 ceiling, then ask for one second more.
+    client.extend_trial(&user, &(u64::MAX - client.get_subscription(&user).unwrap().last_charged));
+    assert_eq!(client.get_subscription(&user).unwrap().last_charged, u64::MAX);
+
+    let res = client.try_extend_trial(&user, &1);
+
+    assert_eq!(res, Err(Ok(soroban_sdk::Error::from_contract_error(36))));
+}
+
+/// `amount * bps` must not wrap for amounts beyond the economic caps.
+#[test]
+#[should_panic(expected = "Error(Contract, #36)")]
+fn test_calculate_fee_amount_overflow_fails_with_typed_error() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+
+    env.as_contract(&contract_id, || {
+        fee::calculate_fee_amount(&env, i128::MAX, 10_000);
+    });
+}
+
+#[test]
+fn test_calculate_fee_amount_at_max_subscription_amount_does_not_overflow() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+
+    env.as_contract(&contract_id, || {
+        // The largest amount the contract will accept, at the maximum bps.
+        assert_eq!(
+            fee::calculate_fee_amount(&env, MAX_SUBSCRIPTION_AMOUNT, 10_000),
+            MAX_SUBSCRIPTION_AMOUNT
+        );
+        assert_eq!(fee::calculate_fee_amount(&env, MAX_SUBSCRIPTION_AMOUNT, 0), 0);
+    });
+}
+
+/// Accruing a fee onto a `TotalProtocolFees` counter at `i128::MAX` must fail
+/// closed rather than wrap the protocol's own bookkeeping.
+#[test]
+fn test_protocol_fee_accrual_overflow_fails_with_typed_error() {
+    let (env, contract_id, token_addr, user, merchant) = setup();
+    let client = FlowPayClient::new(&env, &contract_id);
+    configure_fee(&env, &contract_id, 500);
+
+    let interval: u64 = 86400;
+    client.subscribe(
+        &user,
+        &merchant,
+        &10_0000000,
+        &interval,
+        &token_addr,
+        &None,
+        &None,
+    );
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalProtocolFees, &i128::MAX);
+    });
+
+    env.ledger().with_mut(|l| {
+        l.timestamp += interval + 1;
+    });
+
+    let res = client.try_charge(&user);
+    assert_eq!(res, Err(Ok(soroban_sdk::Error::from_contract_error(36))));
+}
+
+/// An accumulator that cannot represent the sum is an overflow (#36), which is
+/// a different failure from breaching the hourly cap (#28).
+#[test]
+#[should_panic(expected = "Error(Contract, #36)")]
+fn test_global_volume_accumulator_overflow_fails_with_typed_error() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::GlobalVolumeWindow,
+            &GlobalVolumeWindow {
+                current_window_start: env.ledger().timestamp(),
+                accumulated_volume: i128::MAX,
+            },
+        );
+        check_and_update_global_volume(&env, 1);
+    });
+}
+
+/// A window start near `u64::MAX` must not wrap the rollover comparison.
+#[test]
+#[should_panic(expected = "Error(Contract, #36)")]
+fn test_global_volume_window_end_overflow_fails_with_typed_error() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::GlobalVolumeWindow,
+            &GlobalVolumeWindow {
+                current_window_start: u64::MAX,
+                accumulated_volume: 0,
+            },
+        );
+        check_and_update_global_volume(&env, 1);
+    });
+}
+
+/// Breaching the hourly cap still reports `GlobalVolumeExceeded` (#28) —
+/// the overflow work above must not have changed the cap's error mapping.
+#[test]
+#[should_panic(expected = "Error(Contract, #28)")]
+fn test_global_volume_cap_breach_still_reports_28() {
+    let (env, contract_id, _token_addr, _user, _merchant) = setup();
+
+    env.as_contract(&contract_id, || {
+        check_and_update_global_volume(&env, GLOBAL_MAX_VOLUME_PER_HOUR + 1);
+    });
+}

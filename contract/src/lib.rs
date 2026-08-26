@@ -610,6 +610,7 @@ impl FlowPay {
     /// - If `additional_seconds` is 0 (`IntervalMustBePositive`).
     /// - If the subscription is cancelled/inactive (`SubscriptionInactive`).
     /// - If the subscription doesn't exist (`NoSubscriptionFound`).
+    /// - If `last_charged + additional_seconds` overflows `u64` (`ArithmeticOverflow`).
     pub fn extend_trial(env: Env, user: Address, additional_seconds: u64) {
         bump_instance_ttl(&env);
         user.require_auth();
@@ -2214,15 +2215,26 @@ pub(crate) fn check_and_update_global_volume(env: &Env, amount: i128) {
             accumulated_volume: 0,
         });
 
-    if now >= window.current_window_start + HOUR_IN_SECONDS {
+    // Checked: a window start near u64::MAX must not wrap the rollover test
+    // into an accidental (or permanently suppressed) window reset.
+    let window_end = window
+        .current_window_start
+        .checked_add(HOUR_IN_SECONDS)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
+
+    if now >= window_end {
         window.current_window_start = now;
         window.accumulated_volume = 0;
     }
 
+    // Overflow and cap breach are distinct failure modes: an accumulator that
+    // cannot represent the sum is a typed `ArithmeticOverflow`, not a policy
+    // rejection, so clients can tell "the protocol is at its hourly cap" from
+    // "this amount is not representable".
     let new_volume = window
         .accumulated_volume
         .checked_add(amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::GlobalVolumeExceeded));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
 
     if new_volume > GLOBAL_MAX_VOLUME_PER_HOUR {
         env.panic_with_error(ContractError::GlobalVolumeExceeded);

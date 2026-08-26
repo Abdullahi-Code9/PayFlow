@@ -70,4 +70,7 @@ pub enum ContractError {
     InvalidFeeBounds = 34,
     /// Returned when a pending fee proposal violates the current fee bounds at commit time
     FeeOutOfBoundsAtCommit = 35,
+    /// Returned when a checked arithmetic operation overflows (trial extension,
+    /// fee calculation, protocol-fee accrual, or global volume accumulation)
+    ArithmeticOverflow = 36,
 }

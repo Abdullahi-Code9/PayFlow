@@ -95,11 +95,18 @@ pub fn clear_fee(env: &Env) {
 }
 
 /// Computes the protocol fee for `amount` using configured bps (0 when unset).
-pub fn calculate_fee_amount(amount: i128, bps: u32) -> i128 {
+///
+/// `amount * bps` is the one multiplication in the fee path that can leave
+/// i128 range for amounts near the economic caps, so it is checked and fails
+/// closed with `ArithmeticOverflow` instead of wrapping or string-panicking.
+pub fn calculate_fee_amount(env: &Env, amount: i128, bps: u32) -> i128 {
     if bps == 0 || amount <= 0 {
         return 0;
     }
-    amount * (bps as i128) / 10_000
+    amount
+        .checked_mul(bps as i128)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow))
+        / 10_000
 }
 
 /// Returns the cumulative protocol fees collected across all merchants.
@@ -115,10 +122,12 @@ fn accumulate_protocol_fees(env: &Env, amount: i128) {
     if amount <= 0 {
         return;
     }
-    let total = get_total_protocol_fees(env);
+    let total = get_total_protocol_fees(env)
+        .checked_add(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
     env.storage()
         .instance()
-        .set(&DataKey::TotalProtocolFees, &(total + amount));
+        .set(&DataKey::TotalProtocolFees, &total);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -158,7 +167,7 @@ pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscriptio
 
     let fee_amount = match fee_collector {
         Some(collector) if bps > 0 => {
-            let fee = calculate_fee_amount(sub.amount, bps);
+            let fee = calculate_fee_amount(env, sub.amount, bps);
             if fee > 0 {
                 let token_client = token::Client::new(env, &sub.token);
                 token_client.transfer_from(&env.current_contract_address(), user, &collector, &fee);
@@ -168,7 +177,10 @@ pub fn transfer_subscription_charge(env: &Env, user: &Address, sub: &Subscriptio
         }
         _ => 0,
     };
-    let net = sub.amount - fee_amount;
+    let net = sub
+        .amount
+        .checked_sub(fee_amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
 
     let token_client = token::Client::new(env, &sub.token);
     token_client.transfer_from(&env.current_contract_address(), user, &sub.merchant, &net);
@@ -198,7 +210,7 @@ pub fn transfer_pay_per_use(
 
     let fee_amount = match fee_collector {
         Some(collector) if bps > 0 => {
-            let fee = calculate_fee_amount(amount, bps);
+            let fee = calculate_fee_amount(env, amount, bps);
             if fee > 0 {
                 let token_client = token::Client::new(env, token);
                 token_client.transfer_from(&env.current_contract_address(), user, &collector, &fee);
@@ -208,7 +220,9 @@ pub fn transfer_pay_per_use(
         }
         _ => 0,
     };
-    let net = amount - fee_amount;
+    let net = amount
+        .checked_sub(fee_amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
 
     let token_client = token::Client::new(env, token);
     token_client.transfer_from(&env.current_contract_address(), user, recipient, &net);
