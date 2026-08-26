@@ -32,6 +32,20 @@ npm install
 
 ---
 
+## Scripts
+
+| Script                         | Purpose                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `keeper.ts`                    | Autonomous keeper — calls `batch_charge` on a schedule; supports dry-run  |
+| `watch-events.ts`              | Real-time contract event monitor                          |
+| `check-allowances.ts`          | Audit subscriber token allowances                         |
+| `alert-expiring-allowances.ts` | Alert on allowances expiring within a configurable window |
+| `indexer.ts`                   | Persist contract events to SQLite                         |
+| `query-events.ts`              | Query the SQLite event database                           |
+| `health-check.ts`              | Contract responsiveness check                             |
+| `subscription-snapshot.ts`     | Snapshot all subscription states                          |
+| `daily-revenue-summary.ts`     | Daily revenue report                                      |
+| `export-merchant-report.ts`    | Per-merchant activity report                              |
 ## Testnet quick start
 
 Copy-pastable **testnet** commands. Use placeholder keys only; do not put Mainnet
@@ -68,6 +82,10 @@ docker compose down
 
 ## Keeper
 
+The keeper bot uses `buildOptimizedBatches()` to select only ready subscribers
+(ordered by grace urgency and overdue age) and calls `batch_charge()` on each
+batch, then sleeps until the next cycle. Supports a `DRY_RUN` mode that
+simulates charges without submitting any transactions.
 ### Purpose
 
 The keeper is an off-chain loop that pages through subscriptions and invokes
@@ -98,10 +116,20 @@ batches, `DRY_RUN`, and a `--once` flag.
 ### Testnet startup
 
 ```bash
+# Live mode
+CONTRACT_ID=C...  \
+KEEPER_PUBLIC_KEY=G...  \
+KEEPER_SECRET=S...  \
 cd scripts
 CONTRACT_ID=C... \
 KEEPER_SECRET=S... \
 tsx keeper.ts
+
+# Dry-run (simulate only, no transactions submitted)
+CONTRACT_ID=C...  \
+KEEPER_PUBLIC_KEY=G...  \
+DRY_RUN=true  \
+tsx keeper.ts --once
 ```
 
 Or `npm run keeper` after exporting the same variables (or loading `.env` in
@@ -136,6 +164,50 @@ docker compose logs keeper | grep '"msg":"FlowPay Keeper starting"'
 
 ### Additional variables the file reads
 
+| Variable             | Default                          | Description                                         |
+| -------------------- | -------------------------------- | --------------------------------------------------- |
+| `RPC_URL`            | testnet RPC                      | Soroban RPC endpoint                                |
+| `NETWORK_PASSPHRASE` | testnet passphrase               | Stellar network passphrase                          |
+| `BATCH_SIZE`         | `50`                             | Subscribers per `batch_charge` call (max 50)        |
+| `INTERVAL_SECONDS`   | `3600` (1 h)                     | Seconds between full charge cycles                  |
+| `DRY_RUN`            | `false`                          | Set `true` to simulate charges without submitting   |
+| `REPORT_DIR`         | `<script_dir>/data/benchmarks`   | Directory for dry-run reports and live-cycle pointer|
+
+### Dry-run report
+
+Every time the keeper completes a cycle in `DRY_RUN=true` mode, it writes a
+timestamped JSON report to `REPORT_DIR`:
+
+```
+keeper-dryrun-report-2026-08-26T10-00-00.000Z.json
+```
+
+The report contains:
+
+- **`estimatedOutcomes`** — aggregate counts: `totalChecked`, `totalCharged`,
+  `totalVolumeStroops`, and `skipCounts` broken down by each `ChargeResult`
+  variant (`Charged`, `Skipped`, `GracePeriodElapsed`, `Paused`,
+  `NoSubscription`, `Inactive`).
+- **`candidates`** — full per-subscriber detail: address, decoded
+  `ChargeResult` variant, and the subscription amount in stroops (for
+  `Charged` entries).
+- **`lastLiveCycle`** — snapshot from the most recent live cycle
+  (`keeper-latest-live.json`), or `null` if no live cycle has run yet.
+- **`comparison`** — delta between this dry-run and the last live cycle
+  (`checkedDelta`, `chargedDelta`, `volumeDelta`) plus `lastLiveAgeHuman`
+  (e.g. `"24.0 hours"`).
+- **`errors`** — any per-batch errors that occurred during the cycle.
+
+After every **live** cycle, the keeper overwrites
+`REPORT_DIR/keeper-latest-live.json` with a compact summary so the next dry
+run can compute a comparison.
+
+See [`data/benchmarks/keeper-dryrun-report-sample.json`](./data/benchmarks/keeper-dryrun-report-sample.json)
+for the full expected shape.
+
+> **Note:** The benchmark files produced by `keeper-benchmark.ts`
+> (`keeper-bench-*.json`) have a completely different schema (submission and
+> confirmation latency percentiles) and are unrelated to these reports.
 `keeper.ts` currently contains two overlapping configuration blocks. Docker and
 `.env.example` follow the first. The second also reads:
 
@@ -486,6 +558,29 @@ CONTRACT_ID=C... tsx health-check.ts
 
 ---
 
+## Environment variable reference
+
+All scripts read configuration from environment variables. The full set used
+across all scripts:
+
+| Variable               | Used by                                         | Description                                                                          |
+| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `CONTRACT_ID`          | all                                             | Deployed FlowPay contract ID                                                         |
+| `RPC_URL`              | all                                             | Soroban RPC endpoint                                                                 |
+| `NETWORK_PASSPHRASE`   | keeper, check-allowances                        | Stellar network passphrase                                                           |
+| `KEEPER_PUBLIC_KEY`    | keeper                                          | Source account public key (must be funded on the network)                            |
+| `KEEPER_SECRET`        | keeper                                          | Stellar secret key (S…) for signing transactions (required in live mode)             |
+| `DRY_RUN`              | keeper                                          | Set `true` to simulate charges without submitting transactions                       |
+| `BATCH_SIZE`           | keeper                                          | Subscriptions per batch_charge call (default 50, max 50)                             |
+| `INTERVAL_SECONDS`     | keeper                                          | Seconds between charge cycles (default 3600)                                         |
+| `REPORT_DIR`           | keeper                                          | Directory for dry-run reports and live-cycle pointer (default: `data/benchmarks`)    |
+| `WEBHOOK_URL`          | alert-expiring-allowances, alert-failed-charges | Webhook POST target                                                                  |
+| `ALERT_WINDOW_LEDGERS` | alert-expiring-allowances                       | Expiry alert threshold                                                               |
+| `DATA_DIR`             | indexer, query-events                           | SQLite database directory                                                            |
+| `DB_FILE`              | indexer, query-events                           | SQLite database path override                                                        |
+| `POLL_INTERVAL_MS`     | indexer                                         | Event polling interval                                                               |
+| `START_LEDGER`         | indexer                                         | First-run start ledger                                                               |
+| `LOG_LEVEL`            | keeper, indexer                                 | Log verbosity                                                                        |
 ## Related
 
 - Mainnet gates: [`docs/MAINNET-DEPLOYMENT.md`](../docs/MAINNET-DEPLOYMENT.md)

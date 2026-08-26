@@ -305,11 +305,37 @@ impl FlowPay {
                 None => ChargeResult::NoSubscription,
                 Some(mut sub) => {
                     if sub.paused && charge_exec::try_auto_resume(&env, &user, &mut sub, now) {
-                        ChargeResult::Charged
+                        // Auto-resumed — fall through to allowance check below.
+                        // Re-run precheck on the now-active sub to be safe, then
+                        // mirror the same allowance check as the live batch path.
+                        match charge_exec::precheck_charge(&sub, now, grace_period) {
+                            Err(skip) => skip,
+                            Ok(()) => {
+                                let token_client =
+                                    soroban_sdk::token::Client::new(&env, &sub.token);
+                                let allowance = token_client
+                                    .allowance(&user, &env.current_contract_address());
+                                if allowance < sub.amount {
+                                    ChargeResult::AllowanceInsufficient
+                                } else {
+                                    ChargeResult::Charged
+                                }
+                            }
+                        }
                     } else {
                         match charge_exec::precheck_charge(&sub, now, grace_period) {
                             Err(skip) => skip,
-                            Ok(()) => ChargeResult::Charged,
+                            Ok(()) => {
+                                let token_client =
+                                    soroban_sdk::token::Client::new(&env, &sub.token);
+                                let allowance = token_client
+                                    .allowance(&user, &env.current_contract_address());
+                                if allowance < sub.amount {
+                                    ChargeResult::AllowanceInsufficient
+                                } else {
+                                    ChargeResult::Charged
+                                }
+                            }
                         }
                     }
                 }
