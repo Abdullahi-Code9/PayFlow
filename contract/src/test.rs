@@ -2013,7 +2013,7 @@ fn test_cancel_and_refund_prorated_at_period_start_refunds_full_amount() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #36)")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_cancel_and_refund_prorated_at_interval_end_rejects_zero_refund() {
     let (env, contract_id, token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);
@@ -2039,7 +2039,7 @@ fn test_cancel_and_refund_prorated_at_interval_end_rejects_zero_refund() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #35)")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn test_cancel_and_refund_prorated_rejects_wrong_merchant() {
     let (env, contract_id, _token_addr, user, merchant) = setup();
     let client = FlowPayClient::new(&env, &contract_id);

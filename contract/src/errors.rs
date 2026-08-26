@@ -69,9 +69,9 @@ pub enum ContractError {
     /// Returned when configured fee bounds are inconsistent (min > max, or max > 10000)
     InvalidFeeBounds = 34,
     /// Returned when a refund is requested by a merchant different from the subscription merchant
-    RefundMerchantMismatch = 35,
+    RefundMerchantMismatch = 38,
     /// Returned when prorated cancellation would produce no refund
-    RefundAmountMustBePositive = 36,
+    RefundAmountMustBePositive = 39,
     /// Returned when the merchant cannot fund the requested refund
-    InsufficientMerchantBalance = 37,
+    InsufficientMerchantBalance = 40,
 }
