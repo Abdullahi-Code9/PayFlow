@@ -173,13 +173,16 @@ pub struct HealthReport {
     pub contract_paused: bool,
     pub token_configured: bool,
     pub admin_configured: bool,
+    /// Approximate instance TTL in ledgers. On-chain, this is a hardcoded
+    /// lower-bound estimate (100_000) because Soroban does not expose
+    /// `get_ttl()` outside test builds. Do not treat as precise.
     pub instance_ttl_ledgers: u32,
     pub active_subscription_count: u64,
     pub schema_version: u32,
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
+    /// Number of merchants with unwithdrawn revenue > 0.
     pub pending_merchant_rev_count: u32,
-    pub pending_merchant_revenue_count: u32,
 }
 
 #[contracttype]
@@ -862,6 +865,10 @@ impl FlowPay {
 
     pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         upgrade::propose_upgrade(&env, new_wasm_hash);
+    }
+
+    pub fn cancel_pending_upgrade(env: Env) {
+        upgrade::cancel_pending_upgrade(&env);
     }
 
     pub fn commit_upgrade(env: Env) {
@@ -1778,12 +1785,10 @@ impl FlowPay {
 
         let total_merchants = merchant_stats::get_merchant_index_size(&env);
         let mut pending_merchant_rev_count = 0;
-        let mut pending_merchant_revenue_count = 0;
         for i in 0..total_merchants {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
                     pending_merchant_rev_count += 1;
-                    pending_merchant_revenue_count += 1;
                 }
             }
         }
@@ -1805,7 +1810,6 @@ impl FlowPay {
             fee_collector_set,
             global_volume_utilization_pct,
             pending_merchant_rev_count,
-            pending_merchant_revenue_count,
         }
     }
 
@@ -1885,6 +1889,7 @@ impl FlowPay {
         env.storage().persistent().set(&new_key, &sub);
         env.storage().persistent().remove(&old_key);
 
+        subscription_count::transfer_subscriber_index(&env, &user, &new_user);
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);

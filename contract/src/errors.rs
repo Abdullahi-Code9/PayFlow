@@ -74,4 +74,6 @@ pub enum ContractError {
     RefundAmountMustBePositive = 36,
     /// Returned when the merchant cannot fund the requested refund
     InsufficientMerchantBalance = 37,
+    /// Returned when a pending fee proposal violates the current fee bounds at commit time
+    FeeOutOfBoundsAtCommit = 35,
 }
