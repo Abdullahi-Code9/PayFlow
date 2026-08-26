@@ -31,6 +31,20 @@ npm install
 | `daily-revenue-summary.ts`     | Daily revenue report                                      |
 | `export-merchant-report.ts`    | Per-merchant activity report                              |
 
+### Daily revenue delivery
+
+Generate the previous UTC day's report, cache it under `data/reports/`, and
+optionally deliver it as JSON:
+
+```bash
+WEBHOOK_URL=https://hooks.example.com/payflow \
+  tsx daily-revenue-summary.ts [--date YYYY-MM-DD] [--webhook <url>] [--force]
+```
+
+Set `SLACK_WEBHOOK_URL` to deliver a Slack Block Kit message. A cached report
+is skipped, including delivery, unless `--force` is provided. Webhook failures
+are logged but do not change the successful report exit status.
+
 ---
 
 ## Keeper
