@@ -22,19 +22,10 @@
     "watch-events": "tsx watch-events.ts",
     "check-allowances": "tsx check-allowances.ts",
     "alert-expiring-allowances": "tsx alert-expiring-allowances.ts",
-    "indexer": "tsx indexer.ts",
-    "query-events": "tsx query-events.ts",
-    "keeper": "tsx keeper.ts",
-    "build": "tsc -p tsconfig.build.json",
     "batch-optimizer": "tsx batch-optimizer.ts",
     "pre-upgrade-check": "tsx pre-upgrade-check.ts",
     "subscriber-health": "tsx subscriber-health-dashboard.ts",
     "topup-allowance": "tsx topup-allowance.ts",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
-    "batch-optimizer": "tsx batch-optimizer.ts",
-    "pre-upgrade-check": "tsx pre-upgrade-check.ts",
-    "subscriber-health": "tsx subscriber-health-dashboard.ts",
     "validate-config": "tsx validate-config.ts"
   },
   "dependencies": {
@@ -46,9 +37,7 @@
     "@types/node": "^25.9.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.0.0",
-    "vitest": "^2.1.9"
     "typescript": "^5.4.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.1.9"
   }
 }
