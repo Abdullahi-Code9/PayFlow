@@ -175,7 +175,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 **Recovery steps**
 
 1. Verify deployment completed and `initialize(token, admin, …)` succeeded.
-2. Run post-deploy verification (`scripts/verify-contract.sh` or health reads).
+2. Run post-deploy verification (`contract_health_check` and `npx tsx scripts/health-check.ts`; see [`DEPLOYMENT.md`](DEPLOYMENT.md#post-deployment-health-gates)).
 3. Only then open the contract to users/keepers.
 
 **Prevention:** Gate frontend and keeper startup on a successful health/schema check.
