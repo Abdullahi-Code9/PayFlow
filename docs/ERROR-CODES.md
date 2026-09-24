@@ -54,7 +54,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 | 39   | `RefundAmountMustBePositive`| Validation   | Prorated refund is zero           |
 | 40   | `InsufficientMerchantBalance`| Limit       | Merchant cannot fund refund       |
 | 41   | `CannotClearActiveSubscriber` | State      | Admin index repair of an active subscriber |
-| 42   | `SchemaMigrationRequired`   | State        | Migration required before writes |
+| 42   | `SchemaMigrationRequired`   | State        | Stale schema — subscription writes denied until migrate |
 | 43   | `ResumeGraceLapsed`         | State        | Resume after grace period elapsed |
 
 > **Compatibility:** code 18 (`ContractPaused`) is the sole canonical contract-paused error and is emitted by every pause guard. `ContractPausedError` remains a deprecated Rust enum variant at code 30 only for source/wire compatibility with clients that published that value; it is never emitted by current WASM. Code 31 is intentionally reserved and has no enum variant in the published map. Code 37 remains unassigned; new errors must use a new code and update this table, frontend handling, and mapping tests together. Source of truth: [`contract/src/errors.rs`](../contract/src/errors.rs).
@@ -175,7 +175,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 **Recovery steps**
 
 1. Verify deployment completed and `initialize(token, admin, …)` succeeded.
-2. Run post-deploy verification (`scripts/verify-contract.sh` or health reads).
+2. Run post-deploy verification (`contract_health_check` and `npx tsx scripts/health-check.ts`; see [`DEPLOYMENT.md`](DEPLOYMENT.md#post-deployment-health-gates)).
 3. Only then open the contract to users/keepers.
 
 **Prevention:** Gate frontend and keeper startup on a successful health/schema check.
@@ -678,6 +678,28 @@ is not representable at all.
 
 ---
 
+### 42 — `SchemaMigrationRequired`
+
+| Field               | Detail |
+| ------------------- | ------ |
+| **When it occurs**  | `migration::require_current_version` panics because `get_schema_version() < CURRENT_VERSION` (3). Intended on **new subscription-blob writes** (`subscribe` / `subscribe_with_metadata` via `subscribe_inner`). |
+| **Immediate cause** | On-chain schema has not finished catch-up after a WASM upgrade (or a fresh instance that has never been migrated). This is the **write-denial safety rail**, not a client validation bug. |
+| **Invariant**       | Documented on `require_current_version` in [`contract/src/migration.rs`](../contract/src/migration.rs): mixed-version `Subscription` blobs must not be created while operators are still paging `migrate()`. |
+
+**Recovery steps**
+
+Follow the canonical operator procedure in [`DEPLOYMENT.md` — SchemaMigrationRequired (error 42)](DEPLOYMENT.md#schemamigrationrequired-error-42). In short:
+
+1. Read `get_schema_version` (expect 0, 1, or 2 while blocked).
+2. As **admin**, page `get_subscriber_page` and call `migrate --users '[...]'` until version is **3**.
+3. Retry the subscribe call.
+
+`migrate` itself is **not** blocked by this error (`require_admin` only). Other admin paths (pause, whitelist, two-step upgrade, fee propose/commit) also do not call `require_current_version`.
+
+**Prevention:** After every layout-changing WASM commit, finish paged `migrate` and confirm `get_schema_version() == 3` before opening subscribe to users. See [`DEPLOYMENT.md` — State Migration](DEPLOYMENT.md#state-migration).
+
+---
+
 ## Error Categories
 
 | Category       | Codes                                                | Typical owners                |
@@ -687,7 +709,7 @@ is not representable at all.
 | Category       | Codes                                    | Typical owners                |
 | -------------- | ---------------------------------------- | ----------------------------- |
 | Auth / access  | 8, 10, 22                                | User + admin                  |
-| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36, 41 | Deployer, user, admin, keeper |
+| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36, 41, 42 | Deployer, user, admin, keeper |
 | Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32, 33, 34, 35 | Client / admin tooling        |
 | Limit / timing | 6, 9, 15, 20, 25, 28                                 | Keeper + user                 |
 
@@ -781,7 +803,7 @@ is not representable at all.
 
 | Codes     | Guidance                                                  |
 | --------- | --------------------------------------------------------- |
-| 7, 18 | “Service temporarily unavailable.”                        |
+| 7, 18, 42 | “Service temporarily unavailable.” (42 = schema migration in progress — operators: [`DEPLOYMENT.md`](DEPLOYMENT.md#schemamigrationrequired-error-42)) |
 | 10        | “Merchant pending approval.”                              |
 | 28        | “Protocol capacity reached; try later.”                   |
 | 20, 29    | Operator/config bugs — log to telemetry, don’t blame user |
@@ -793,6 +815,7 @@ Always map numeric Soroban contract errors to this document before inventing new
 ## Related
 
 - Contract source: [`contract/src/errors.rs`](../contract/src/errors.rs)
+- Schema write-denial invariant: [`docs/DEPLOYMENT.md` — SchemaMigrationRequired](DEPLOYMENT.md#schemamigrationrequired-error-42) (`contract/src/migration.rs`)
 - Troubleshooting runbook: [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 - Keeper guide: [`docs/KEEPER.md`](KEEPER.md)
 - API reference: [`docs/API.md`](API.md)

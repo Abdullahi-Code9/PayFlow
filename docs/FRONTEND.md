@@ -343,3 +343,5 @@ The frontend is organized around a simple principle:
 - `stellar.ts` owns blockchain communication.
 - Freighter signs transactions.
 - React state and hooks manage application state efficiently.
+
+Admin batch size caps (pause, whitelist, charge, cancel) vs the contract: [`limits.md`](limits.md). Component catalog: [`FRONTEND-COMPONENTS.md`](FRONTEND-COMPONENTS.md).
