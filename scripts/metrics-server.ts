@@ -23,10 +23,9 @@
  *   keeper_cycles_total                  — Counter, total charge cycles run
  */
 
-import http from "node:http";
+import http, { type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from "prom-client";
-import type { Server } from "node:http";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 

@@ -68,7 +68,7 @@
  *     state, interval, and grace period.
  */
 
-import { Server } from "@stellar/stellar-sdk/rpc";
+import { Server, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 import { buildOptimizedBatches } from "./batch-optimizer";
 import {
   Contract,
@@ -79,7 +79,6 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
-import { Server, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 

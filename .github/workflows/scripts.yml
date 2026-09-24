@@ -1,0 +1,38 @@
+name: Scripts
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "scripts/**"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "scripts/**"
+
+defaults:
+  run:
+    working-directory: scripts
+
+jobs:
+  lint-duplicates:
+    name: lint-duplicates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check for duplicate imports
+        run: node lint-duplicates.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm run test
