@@ -42,6 +42,7 @@ pub fn batch_charge(env: &Env, users: Vec<Address>) -> Vec<ChargeResult> {
             Some(mut sub) => match charge_exec::precheck_charge(&sub, now, grace_period) {
                 Err(skip) => skip,
                 Ok(()) => {
+                    crate::check_and_update_global_volume(env, sub.amount);
                     charge_exec::execute_charge(env, &user, &key, &mut sub, now);
                     ChargeResult::Charged
                 }
