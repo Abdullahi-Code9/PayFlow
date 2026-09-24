@@ -1,234 +1,353 @@
-import { SorobanRpc } from "@stellar/stellar-sdk";
-import * as fs from "fs";
-import * as path from "path";
-
-// Shared logger utility
-const createLogger = () => {
-  return {
-    info: (msg: string) => console.log(`[INFO] ${new Date().toISOString()} ${msg}`),
-    error: (msg: string) => console.error(`[ERROR] ${new Date().toISOString()} ${msg}`),
-    warn: (msg: string) => console.warn(`[WARN] ${new Date().toISOString()} ${msg}`),
-    debug: (msg: string) => console.log(`[DEBUG] ${new Date().toISOString()} ${msg}`),
-  };
-};
-
-const logger = createLogger();
-
-interface WatermarkState {
-  lastCursor: string;
-  lastLedger: number;
-  seenCount: number;
-  timestamp: number;
-}
-
-const WATERMARK_FILE = path.join(process.cwd(), ".watch-events-watermark.json");
-const MAX_SEEN_SET_SIZE = 10000; // Bound the seen-set
-const CURSOR_WINDOW = 100; // Keep only recent cursors
-
+#!/usr/bin/env tsx
 /**
- * Load watermark from disk to resume from last position
+ * watch-events.ts — Real-time contract event monitor for FlowPay
+ *
+ * Polls getEvents on a 3-second interval and pretty-prints new events to stdout
+ * with color-coded event types and human-readable amounts (stroops → XLM).
  */
-function loadWatermark(): WatermarkState {
-  try {
-    if (fs.existsSync(WATERMARK_FILE)) {
-      const data = JSON.parse(fs.readFileSync(WATERMARK_FILE, "utf8"));
-      logger.info(`Loaded watermark: cursor=${data.lastCursor}, ledger=${data.lastLedger}, seen=${data.seenCount}`);
-      return data;
-    }
-  } catch (err) {
-    logger.warn(`Failed to load watermark: ${err}`);
-  }
-  return { lastCursor: "", lastLedger: 0, seenCount: 0, timestamp: Date.now() };
-}
 
-/**
- * Save watermark to disk for crash recovery
- */
-function saveWatermark(state: WatermarkState): void {
-  try {
-    fs.writeFileSync(WATERMARK_FILE, JSON.stringify(state, null, 2));
-  } catch (err) {
-    logger.error(`Failed to save watermark: ${err}`);
-  }
-}
+import { Server } from "@stellar/stellar-sdk/rpc";
+import { EventDedupCache, createCacheKey } from "./event-dedup.js";
+import { MultiEndpointServer } from "./rpc-client.js";
+import { logger } from "./logger";
+import { sendWebhook, WebhookConfig } from "./webhook.js";
+import { resolve } from "node:path";
 
-/**
- * Prune old cursor entries to prevent unbounded memory growth
- */
-function pruneCursors(cursors: string[]): string[] {
-  if (cursors.length > CURSOR_WINDOW) {
-    return cursors.slice(-CURSOR_WINDOW);
-  }
-  return cursors;
-}
+// ── Configuration ────────────────────────────────────────────────────────────────
 
-/**
- * Main event watcher with bounded memory and deterministic pagination
- */
-async function watchEvents(options: {
-  rpcUrl: string;
-  contractId: string;
-  behind?: number;
-  stopAfter?: number;
-}): Promise<void> {
-  const { rpcUrl, contractId, behind = 0, stopAfter = Infinity } = options;
+const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID = process.env.CONTRACT_ID || "";
+const POLL_INTERVAL_MS = 3000;
+const DEBUG = process.env.DEBUG === "1" || process.env.DEBUG?.includes("payflow");
 
-  const server = new SorobanRpc.Server(rpcUrl);
-  let watermark = loadWatermark();
-  let eventCount = 0;
-  const seenEventIds = new Set<string>();
-  let recentCursors: string[] = [];
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const WEBHOOK_DLQ_FILE = process.env.WEBHOOK_DLQ_FILE || resolve(process.cwd(), "data", "webhook-dlq.jsonl");
 
-  logger.info(`Starting event watcher for contract ${contractId}`);
-  logger.info(`RPC: ${rpcUrl}, Behind: ${behind}, StopAfter: ${stopAfter}`);
-
-  try {
-    while (eventCount < stopAfter) {
-      try {
-        // Get latest ledger for "behind" offset
-        const latestLedger = await server.getLatestLedger();
-        const targetLedger = Math.max(1, latestLedger.sequence - behind);
-
-        logger.debug(`Latest ledger: ${latestLedger.sequence}, Target: ${targetLedger}`);
-
-        // Fetch events with stable pagination cursor
-        const eventRequest: SorobanRpc.GetEventsRequest = {
-          startLedger: watermark.lastLedger || targetLedger,
-          filters: [
-            {
-              type: "contract",
-              contractIds: [contractId],
-            },
-          ],
-          limit: 100,
-          // Use pagination cursor for deterministic page traversal
-          cursor: watermark.lastCursor || undefined,
-        };
-
-        const response = await server.getEvents(eventRequest);
-
-        if (!response.events || response.events.length === 0) {
-          logger.info("No new events, waiting...");
-          await new Promise((r) => setTimeout(r, 5000));
-          continue;
-        }
-
-        logger.info(`Fetched ${response.events.length} events`);
-
-        for (const event of response.events) {
-          // Create deterministic event ID from ledger + index to track duplicates
-          const eventId = `${event.ledger}-${event.index}`;
-
-          // Skip duplicates to prevent double-processing
-          if (seenEventIds.has(eventId)) {
-            logger.debug(`Skipping duplicate event: ${eventId}`);
-            continue;
-          }
-
-          // Bound the seen-set with a watermark
-          if (seenEventIds.size >= MAX_SEEN_SET_SIZE) {
-            logger.warn(
-              `Seen-set reached capacity (${MAX_SEEN_SET_SIZE}), clearing old entries`
-            );
-            seenEventIds.clear();
-          }
-
-          seenEventIds.add(eventId);
-
-          logger.info(
-            `Event #${eventCount + 1}: Ledger ${event.ledger}, Type: ${event.type}`
-          );
-
-          // Process event
-          if (event.type === "contract") {
-            const contractEvent = event as unknown as {
-              contractId: string;
-              topic: string[];
-              value: { xdr: string };
-            };
-            logger.info(
-              `  Contract: ${contractEvent.contractId}, Topics: ${contractEvent.topic.length}`
-            );
-          }
-
-          eventCount++;
-
-          if (eventCount >= stopAfter) {
-            logger.info(`Reached stop limit (${stopAfter} events)`);
-            break;
-          }
-        }
-
-        // Update watermark with latest cursor and ledger for crash recovery
-        if (response.latestLedger) {
-          watermark.lastLedger = response.latestLedger;
-          watermark.seenCount = seenEventIds.size;
-          watermark.timestamp = Date.now();
-
-          // Update cursor if provided (deterministic pagination)
-          if (response.latestCursor) {
-            recentCursors.push(response.latestCursor);
-            recentCursors = pruneCursors(recentCursors);
-            watermark.lastCursor = response.latestCursor;
-          }
-
-          saveWatermark(watermark);
-          logger.debug(
-            `Updated watermark: ledger=${watermark.lastLedger}, cursor=${watermark.lastCursor}`
-          );
-        }
-
-        // Stop if we've reached the target ledger
-        if (response.latestLedger && response.latestLedger >= targetLedger) {
-          logger.info(
-            `Caught up to target ledger ${targetLedger}, waiting for new events...`
-          );
-          await new Promise((r) => setTimeout(r, 5000));
-        }
-      } catch (err) {
-        logger.error(`Error fetching events: ${err}`);
-        await new Promise((r) => setTimeout(r, 5000));
-      }
-    }
-
-    logger.info(`Event watching completed. Total events: ${eventCount}`);
-  } finally {
-    saveWatermark(watermark);
-    logger.info(`Final watermark saved`);
-  }
-}
-
-// Parse CLI arguments
-const args = process.argv.slice(2);
-const options: {
-  rpcUrl: string;
-  contractId: string;
-  behind?: number;
-  stopAfter?: number;
-} = {
-  rpcUrl: "http://localhost:8000/soroban/rpc",
-  contractId: "",
-};
-
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--rpc" && args[i + 1]) {
-    options.rpcUrl = args[++i];
-  } else if (args[i] === "--contract" && args[i + 1]) {
-    options.contractId = args[++i];
-  } else if (args[i] === "--behind" && args[i + 1]) {
-    options.behind = parseInt(args[++i], 10);
-  } else if (args[i] === "--stop-after" && args[i + 1]) {
-    options.stopAfter = parseInt(args[++i], 10);
-  }
-}
-
-if (!options.contractId) {
-  logger.error("Missing required --contract argument");
+if (WEBHOOK_URL && !WEBHOOK_SECRET) {
+  logger.error("Error: WEBHOOK_SECRET is required when WEBHOOK_URL is configured for signed webhook delivery.");
   process.exit(1);
 }
 
-// Run the watcher
-watchEvents(options).catch((err) => {
-  logger.error(`Fatal error: ${err}`);
+const webhookConfig: WebhookConfig | null = WEBHOOK_URL && WEBHOOK_SECRET
+  ? { url: WEBHOOK_URL, secret: WEBHOOK_SECRET, dlqFile: WEBHOOK_DLQ_FILE }
+  : null;
+
+if (!CONTRACT_ID) {
+  console.error("Error: CONTRACT_ID environment variable is required");
+  console.error(
+    "Usage: CONTRACT_ID=your_contract_id RPC_URL=https://... tsx watch-events.ts",
+  );
+  logger.error("Error: CONTRACT_ID environment variable is required");
+  logger.error("Usage: CONTRACT_ID=your_contract_id RPC_URL=https://... tsx watch-events.ts");
+  process.exit(1);
+}
+
+// ── Color Codes ─────────────────────────────────────────────────────────────────
+
+const colors = {
+  reset: "\x1b[0m",
+  bright: "\x1b[1m",
+  dim: "\x1b[2m",
+
+  // Event type colors
+  green: "\x1b[32m", // charged, subscribed
+  red: "\x1b[31m", // cancelled
+  yellow: "\x1b[33m", // pay_per_use, paused
+  blue: "\x1b[34m", // resumed
+  cyan: "\x1b[36m", // admin events
+  magenta: "\x1b[35m", // merchant events
+  gray: "\x1b[90m", // metadata
+};
+
+// ── Event Type Color Mapping ─────────────────────────────────────────────────────
+
+const eventColors: Record<string, string> = {
+  charged: colors.green,
+  subscribed: colors.green,
+  cancelled: colors.red,
+  pay_per_use: colors.yellow,
+  paused: colors.yellow,
+  resumed: colors.blue,
+  admin_transferred: colors.cyan,
+  contract_paused: colors.cyan,
+  contract_unpaused: colors.cyan,
+  merchant_added: colors.magenta,
+  merchant_removed: colors.magenta,
+  merchant_frozen: colors.magenta,
+  merchant_unfrozen: colors.magenta,
+  daily_limit_set: colors.gray,
+  daily_limit_removed: colors.gray,
+  sub_amount_updated: colors.gray,
+  sub_interval_updated: colors.gray,
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Convert stroops to XLM (1 XLM = 10,000,000 stroops)
+ */
+function stroopsToXlm(stroops: string | number | bigint): string {
+  const value = typeof stroops === "bigint" ? Number(stroops) : Number(stroops);
+  const xlm = value / 10_000_000;
+  return xlm.toFixed(7);
+}
+
+/**
+ * Format Unix timestamp to readable string
+ */
+function formatTimestamp(timestamp: number | string): string {
+  const ts =
+    typeof timestamp === "string" ? parseInt(timestamp, 10) : timestamp;
+  const date = new Date(ts * 1000);
+  return date.toISOString();
+}
+
+/**
+ * Shorten address for display (first 8 chars ... last 4 chars)
+ */
+function shortenAddress(address: string): string {
+  if (!address || address.length < 12) return address;
+  return `${address.slice(0, 8)}...${address.slice(-4)}`;
+}
+
+/**
+ * Get color for event type
+ */
+function getEventColor(eventType: string): string {
+  return eventColors[eventType] || colors.reset;
+}
+
+/**
+ * Parse event value field safely
+ */
+function parseEventValueField(value: any, field: string): string {
+  if (!value) return "";
+  const base = value._value?.[field] ?? value[field];
+  if (base == null) return "";
+  if (typeof base === "string") return base;
+  if (typeof base === "number" || typeof base === "bigint")
+    return base.toString();
+  if (typeof base.toString === "function") return base.toString();
+  return "";
+}
+
+/**
+ * Parse event timestamp from various formats
+ */
+function parseEventTime(event: any): number {
+  if (typeof event.ledgerCloseTime === "number") return event.ledgerCloseTime;
+  if (typeof event.ledgerCloseTime === "string")
+    return Number(event.ledgerCloseTime) || 0;
+  if (typeof event.timestamp === "string")
+    return Math.floor(Date.parse(event.timestamp) / 1000);
+  return 0;
+}
+
+// ── Event Processing ─────────────────────────────────────────────────────────────
+
+interface ParsedEvent {
+  id: string;
+  type: string;
+  user: string;
+  merchant?: string;
+  amount?: string;
+  timestamp: number;
+  ledger: number;
+  txHash: string;
+}
+
+/**
+ * Parse a raw event from the RPC response
+ */
+function parseEvent(event: any): ParsedEvent | null {
+  if (!event.topic || event.topic.length < 1) return null;
+
+  const eventType = event.topic[0]?.toString();
+  if (!eventType) return null;
+
+  const user = event.topic[1]?.toString() || "";
+  const timestamp = parseEventTime(event);
+  const ledger = event.ledger ?? 0;
+  const txHash = event.txHash ?? event.id ?? "";
+  const id = `${ledger}:${txHash}:${eventType}:${user}`;
+
+  let merchant: string | undefined;
+  let amount: string | undefined;
+
+  // Parse event-specific fields
+  if (event.value) {
+    merchant = parseEventValueField(event.value, "merchant");
+    amount =
+      parseEventValueField(event.value, "amount") ||
+      parseEventValueField(event.value, "gross") ||
+      parseEventValueField(event.value, "net");
+  }
+
+  return {
+    id,
+    type: eventType,
+    user,
+    merchant,
+    amount,
+    timestamp,
+    ledger,
+    txHash,
+  };
+}
+
+/**
+ * Pretty-print an event to stdout
+ */
+function printEvent(event: ParsedEvent): void {
+  const color = getEventColor(event.type);
+  const timestamp = formatTimestamp(event.timestamp);
+  const user = shortenAddress(event.user);
+  const merchant = event.merchant ? shortenAddress(event.merchant) : "N/A";
+  const amount = event.amount ? `${stroopsToXlm(event.amount)} XLM` : "N/A";
+
+  logger.info(
+    `${colors.dim}${timestamp}${colors.reset} ` +
+      `${color}${colors.bright}${event.type}${colors.reset} ` +
+      `${colors.dim}|${colors.reset} ` +
+      `User: ${user} ` +
+      `${colors.dim}|${colors.reset} ` +
+      `Merchant: ${merchant} ` +
+      `${colors.dim}|${colors.reset} ` +
+      `Amount: ${amount} ` +
+      `${colors.dim}|${colors.reset} ` +
+      `Ledger: ${event.ledger}`,
+  );
+}
+
+// ── Main Polling Loop ───────────────────────────────────────────────────────────
+
+/**
+ * Log a debug message when DEBUG env is set.
+ */
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    logger.error(colors.dim + "[DEBUG]" + colors.reset, ...args);
+  }
+}
+
+const server = new MultiEndpointServer(RPC_URL);
+const dedupCache = new EventDedupCache();
+const seenEvents = new Set<string>();
+let currentLedger = 0;
+let totalEventsSeen = 0;
+
+async function fetchAndPrintEvents(): Promise<void> {
+  try {
+    if (currentLedger === 0) {
+      const latest = await server.getLatestLedger();
+      currentLedger = latest.sequence;
+    }
+
+    const response = await server.getEvents({
+      startLedger: currentLedger,
+      filters: [{ type: "contract", contractIds: [CONTRACT_ID] }],
+      limit: 100,
+    });
+
+    if (response.latestLedger) {
+      currentLedger = response.latestLedger;
+    }
+
+    const newEvents: ParsedEvent[] = [];
+
+    for (const event of response.events) {
+      const parsed = parseEvent(event);
+      if (!parsed) continue;
+
+      if (!seenEvents.has(parsed.id)) {
+        seenEvents.add(parsed.id);
+
+        // Deduplication check
+        if (!dedupCache.checkAndRecord(parsed.txHash, parsed.type, parsed.ledger)) {
+          newEvents.push(parsed);
+        } else {
+          debugLog(`Duplicate event skipped: ${createCacheKey(parsed.txHash, parsed.type, parsed.ledger)}`);
+        }
+      }
+    }
+
+    
+    // Periodic stats logging (every 100 events processed)
+    totalEventsSeen += response.events.length;
+    if (totalEventsSeen >= 100) {
+      const s = dedupCache.stats;
+      logger.error(
+        colors.dim + `[DEDUP] ${s.deduplicatedTotal} duplicates skipped, ` +
+        `${s.totalProcessed} unique processed, ` +
+        `${s.size}/${s.maxSize} cache entries, ` +
+        `${s.evictions} evictions` + colors.reset
+      );
+      totalEventsSeen = 0;
+    }
+    
+    // Sort by timestamp and print new events
+    newEvents.sort((a, b) => a.timestamp - b.timestamp);
+    for (const event of newEvents) {
+      printEvent(event);
+
+      // Issue #894: Reliable Signed Webhook Delivery
+      if (webhookConfig) {
+        sendWebhook(event, webhookConfig).catch(err => {
+          logger.error(`Failed to trigger webhook for event ${event.id}: ${err}`);
+        });
+      }
+    }
+
+    if (newEvents.length > 0) {
+      console.log(
+        colors.dim + `─ ${newEvents.length} new event(s) ─` + colors.reset,
+      );
+    }
+  } catch (error) {
+    const errorMsg =
+      error instanceof Error ? error.message : JSON.stringify(error);
+    console.error(
+      colors.red + `Error fetching events: ${errorMsg}` + colors.reset,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  console.log(colors.bright + "FlowPay Event Watcher" + colors.reset);
+  console.log(colors.dim + `RPC: ${RPC_URL}` + colors.reset);
+  console.log(colors.dim + `Contract: ${CONTRACT_ID}` + colors.reset);
+  console.log(
+    colors.dim + `Polling every ${POLL_INTERVAL_MS}ms...` + colors.reset,
+  );
+  console.log(colors.dim + `Dedup cache: ${dedupCache.stats.maxSize} entries` + (process.env.EVENT_DEDUP_TTL_MS ? `, TTL: ${process.env.EVENT_DEDUP_TTL_MS}` : "") + colors.reset);
+  if (webhookConfig) {
+    console.log(colors.dim + `Webhook delivery enabled to: ${webhookConfig.url}` + colors.reset);
+  }
+  console.log("");
+  
+  // Initial fetch
+  await fetchAndPrintEvents();
+
+  // Polling loop
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    await fetchAndPrintEvents();
+  }
+}
+
+// ── Error Handling ───────────────────────────────────────────────────────────────
+
+process.on("uncaughtException", (error) => {
+  logger.error(colors.red + `Uncaught exception: ${error}` + colors.reset);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error(colors.red + `Unhandled rejection: ${reason}` + colors.reset);
+});
+
+// Start the watcher
+main().catch((error) => {
+  logger.error(colors.red + `Fatal error: ${error}` + colors.reset);
   process.exit(1);
 });

@@ -52,15 +52,16 @@ pub fn get_daily_limit(env: Env, user: Address) -> Option<i128> {
 get_daily_limit(env: Env, user: Address) -> Option<i128>
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `user` | `Address` | The subscriber address to query |
+| Parameter | Type      | Description                     |
+| --------- | --------- | ------------------------------- |
+| `user`    | `Address` | The subscriber address to query |
 
 **Returns:** `Some(limit)` in stroops if a limit is set, `None` otherwise.  
 **Auth:** None required.  
 **Storage:** Reads `DataKey::DailyLimit(user)` from temporary storage.
 
 **CLI example:**
+
 ```bash
 soroban contract invoke \
   --id <CONTRACT_ID> \
@@ -138,6 +139,7 @@ cargo test daily_limit
 ```
 
 Expected output:
+
 ```
 test test::test_daily_limit_allows_spend_within_limit ... ok
 test test::test_daily_limit_accumulates_across_calls ... ok
@@ -182,7 +184,7 @@ Contract WASM can be replaced by the admin via the `upgrade(new_wasm_hash)` entr
 
 ### What is the difference between Testnet and Mainnet deployments?
 
-FlowPay is **currently deployed on Testnet only** and has not been formally audited — it should not be used to manage real funds on Mainnet until an independent Soroban security audit is completed and published. The frontend targets the network specified by three environment variables in `frontend/.env`: `VITE_CONTRACT_ID` (your deployed contract address), `VITE_RPC_URL` (defaults to `https://soroban-testnet.stellar.org`), and `VITE_NETWORK_PASSPHRASE` (defaults to `Networks.TESTNET`). Switching to Mainnet requires updating all three variables to point to your Mainnet contract and RPC endpoint. The planned audit roadmap is documented in [Security](docs/SECURITY.md#audit-roadmap).
+FlowPay is **currently deployed on Testnet only** and has not been formally audited — it should not be used to manage real funds on Mainnet until an independent Soroban security audit is completed and published. The frontend targets the network specified by three environment variables in `frontend/.env`: `VITE_CONTRACT_ID` (your deployed contract address), `VITE_RPC_URL` (defaults to `https://soroban-testnet.stellar.org`), and `VITE_NETWORK_PASSPHRASE` (defaults to `Networks.TESTNET`). Switching to Mainnet requires updating all three variables to point to your Mainnet contract and RPC endpoint. The planned audit roadmap is documented in [Security](docs/SECURITY.md#audit-roadmap). For the full Mainnet go-live checklist (security gates, key management, deploy, verification, announcement), see [Mainnet Deployment Checklist](docs/MAINNET-DEPLOYMENT.md).
 
 ### Why is `charge()` permissionless — isn't that a security risk?
 
@@ -200,11 +202,11 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Rust | 1.70+ | `curl https://sh.rustup.rs -sSf \| sh` |
-| wasm32 target | — | `rustup target add wasm32-unknown-unknown` |
-| Soroban CLI | 21.x | `cargo install --locked soroban-cli` |
+| Tool          | Version | Install                                    |
+| ------------- | ------- | ------------------------------------------ |
+| Rust          | 1.70+   | `curl https://sh.rustup.rs -sSf \| sh`     |
+| wasm32 target | —       | `rustup target add wasm32-unknown-unknown` |
+| Soroban CLI   | 21.x    | `cargo install --locked soroban-cli`       |
 
 ---
 
@@ -216,3 +218,67 @@ Stellar's Soroban platform uses state archiving — persistent storage entries h
 - `pay_per_use(user, amount)` — the function this limit applies to
 - Full API reference: [`docs/API.md`](docs/API.md)
 - Architecture overview: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Referral system (canonical): [`docs/REFERRALS.md`](docs/REFERRALS.md)
+- Developer Integration Guide: [`docs/INTEGRATION-GUIDE.md`](docs/INTEGRATION-GUIDE.md)
+- Mainnet deployment checklist: [`docs/MAINNET-DEPLOYMENT.md`](docs/MAINNET-DEPLOYMENT.md)
+- Merchant Integration Cookbook: [`docs/MERCHANT-INTEGRATION.md`](docs/MERCHANT-INTEGRATION.md)
+
+---
+
+## Subscriber Churn Analysis Dashboard
+
+The **Subscriber Churn Analysis Dashboard** script offers detailed cohort-based monthly retention metrics, merchant-level churn breakdown, and future churn projections.
+
+### Features
+
+- **Data Ingestion with Graceful Fallback**: Automatically reads from your local SQLite indexer database if available, and gracefully falls back to querying on-chain Soroban RPC events otherwise.
+- **Monthly Cohort Tracking**: Groups subscribers by initial subscription month to compute 30-day and 90-day active counts and retention rates. Includes data guarding that flags younger cohorts as `"insufficient data"`.
+- **Merchant Churn Breakdown**: Identifies the Top 5 high-churn merchants while automatically filtering out single-subscriber merchants (`subscribers <= 1`) to eliminate statistical skew.
+- **Historical Churn Projection**: Analyzes historical monthly average churn rates of completed cohorts and applies them to current active subscribers to project the next month's churn.
+- **Dual Formats**: Outputs reports in raw JSON or formatted CSV tables.
+
+### Usage
+
+Run the script using `ts-node` or `tsx` from the `scripts` or root directory:
+
+```bash
+# Display JSON report (Default)
+npx tsx scripts/churn-analysis.ts --db indexer.db
+
+# Output as CSV tables
+npx tsx scripts/churn-analysis.ts --format csv --db indexer.db
+
+# Save report directly to a file
+npx tsx scripts/churn-analysis.ts --format csv --db indexer.db --out churn_report.csv
+
+# Customize resubscription logic ("new" or "retention")
+npx tsx scripts/churn-analysis.ts --resubscription-logic retention --format csv
+```
+
+#### CLI Options
+
+| Option                                    | Description                            | Default      |
+| ----------------------------------------- | -------------------------------------- | ------------ |
+| `--format [json\|csv]`                    | Output format for the report           | `json`       |
+| `--db <path>`                             | Path override to the SQLite Indexer DB | `indexer.db` |
+| `--out <file>`                            | Path to save the report output file    | stdout       |
+| `--resubscription-logic [new\|retention]` | Resubscription handling strategy       | `new`        |
+
+---
+
+## RPC Endpoint Failover Configuration
+
+To configure multi-endpoint failover and ensure high availability for all backend and analytical scripts, you can specify a comma-separated list of RPC URLs using the `RPC_URLS` environment variable.
+
+### Configuration Variables
+
+| Variable                                         | Description                                                                                | Example / Default                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `RPC_URLS`                                       | Comma-separated list of resilient RPC endpoints for script failover and retry mechanism.   | `https://soroban-testnet.stellar.org,https://another-rpc-endpoint.com` |
+| `RPC_URL` / `VITE_RPC_URL`                       | Fallback single RPC endpoint if `RPC_URLS` is not provided.                                | `https://soroban-testnet.stellar.org`                                  |
+| `NETWORK_PASSPHRASE` / `VITE_NETWORK_PASSPHRASE` | Expected network passphrase used during initialization/health check to validate endpoints. | `Test SDF Network ; September 2015`                                    |
+
+### Failover and Retry Behavior
+
+All operational backend scripts under the `/scripts` directory utilize a resilient `MultiEndpointServer` (implemented in `scripts/rpc-client.ts`) instead of the standard `Server` from `@stellar/stellar-sdk/rpc`.
+On first use, the client performs health and passphrase validation across all configured endpoints to ensure they belong to the expected Stellar network. Consistently failing endpoints are dynamically deprioritized. Upon failure, the script will log a warning and transparently retry the request using the next available endpoint.

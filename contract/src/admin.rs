@@ -8,6 +8,11 @@ pub fn require_admin(env: &Env) {
     admin.require_auth();
 }
 
+/// Authorize `admin` and persist it as the sole contract admin.
+///
+/// Called from `initialize` *before* the default token is stored so deploy
+/// scripts cannot observe a token-configured / admin-missing split state.
+/// Auth is required; this does not add a second admin.
 pub fn initialize_admin(env: &Env, admin: &Address) {
     admin.require_auth();
     set_admin(env, admin);
@@ -21,6 +26,11 @@ pub fn transfer_admin(env: &Env, new_admin: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::PendingAdmin, new_admin);
+}
+
+/// Returns the currently proposed admin awaiting `accept_admin()`, if any.
+pub fn get_pending_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::PendingAdmin)
 }
 
 /// Step 2: proposed new admin accepts and becomes the active admin.
