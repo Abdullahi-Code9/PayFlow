@@ -45,8 +45,12 @@ function rawEvent(opts: {
   ledger: number;
   address?: string;
   amount?: number;
+  eventIndex?: number;
 }): Record<string, unknown> {
+  // RPC event ids are "<TOID>-<event index>"; TOID = ledger << 32 (tx/op 0 here).
+  const toid = (BigInt(opts.ledger) << 32n).toString().padStart(19, "0");
   return {
+    id: `${toid}-${String(opts.eventIndex ?? 0).padStart(10, "0")}`,
     topic: [opts.eventName, opts.address ?? "GADDRESS"],
     ledger: opts.ledger,
     txHash: opts.txHash,

@@ -11,7 +11,7 @@
  *
  * Schema
  * ──────
- *   events     — one row per event occurrence (upsert on tx_hash + event_name)
+ *   events     — one row per event occurrence (upsert on tx_hash + op/event index)
  *   meta       — key/value store for indexer state (last_ledger, schema_version)
  *
  * Usage:
@@ -34,7 +34,8 @@
  * Events are deduplicated with a two-layer strategy (see event-dedup.ts):
  *   1. In-memory EventDedupCache — skips redundant DB writes for events seen
  *      earlier in the same process's uptime (cheap, but lost on restart).
- *   2. SQLite `ON CONFLICT(id)` upsert, keyed on tx_hash+event_name — the
+ *   2. SQLite `ON CONFLICT(id)` upsert, keyed on the event's native position
+ *      (tx_hash + operation index + event index, see stableEventKey) — the
  *      durable guarantee. Restart safety comes from this layer plus the
  *      `last_ledger` cursor in the `meta` table, not from the in-memory cache.
  * Dedup stats (hits/misses/evictions) are logged periodically and, when
@@ -48,8 +49,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { Server } from "@stellar/stellar-sdk/rpc";
-import { logger as rootLogger } from "./logger";
+import type { rpc } from "@stellar/stellar-sdk";
+import { logger as rootLogger } from "./logger.js";
 import { fileURLToPath } from "node:url";
 import { MultiEndpointServer } from "./rpc-client.js";
 import { EventDedupCache, type DedupStats } from "./event-dedup.js";
@@ -66,13 +67,9 @@ const DB_FILE = process.env.DB_FILE ?? resolve(DATA_DIR, "events.db");
 /** Schema version — increment when adding columns or new tables. */
 const SCHEMA_VERSION = 2;
 
-if (!CONTRACT_ID) {
-  // console.error is intentional here — logger child cannot be constructed
-  // before CONTRACT_ID is resolved; this is a fatal pre-init error.
-  console.error("Error: CONTRACT_ID environment variable is required.");
-  console.error("Usage: CONTRACT_ID=<id> tsx indexer.ts");
-  process.exit(1);
-}
+/** Max events requested per getEvents page. */
+const EVENTS_PAGE_LIMIT = 200;
+
 /**
  * Number of unique events processed between periodic dedup-stats log lines
  * and metrics-server snapshots.
@@ -100,7 +97,7 @@ const logger = rootLogger.child({
 
 /** A fully parsed event ready for database insertion. */
 interface IndexedEvent {
-  /** Stable dedup key: "<tx_hash>:<event_name>" */
+  /** Stable dedup key: "<tx_hash>:<op_index>:<event_index>" (see stableEventKey). */
   id: string;
   event_name: string;
   /** Primary address from topic[1] (subscriber or actor). */
@@ -252,6 +249,29 @@ function parseTimestamp(event: Record<string, unknown>): number {
 }
 
 /**
+ * Build a dedup key from the event's native, chain-assigned position:
+ * `<tx_hash>:<op_index>:<event_index>`.
+ *
+ * Soroban RPC event ids are `<TOID>-<event index>`, where the TOID packs
+ * (ledger << 32 | tx order << 12 | op index). The key therefore only depends on
+ * where the event sits on chain — never on cursor, page or poll ordering — so
+ * re-ingesting the same ledger range (e.g. after a restart) always maps to the
+ * same rows, and two same-named events in one tx never collapse into one row.
+ *
+ * Returns null when the event lacks a tx hash or a well-formed id.
+ */
+export function stableEventKey(raw: Record<string, unknown>): string | null {
+  const txHash = raw["txHash"];
+  const id = raw["id"];
+  if (typeof txHash !== "string" || !txHash || typeof id !== "string") return null;
+  const match = /^(\d+)-(\d+)$/.exec(id);
+  if (!match) return null;
+  const opIndex = BigInt(match[1]) & 0xfffn;
+  const eventIndex = BigInt(match[2]);
+  return `${txHash}:${opIndex}:${eventIndex}`;
+}
+
+/**
  * Convert a raw RPC event object into an IndexedEvent.
  * Returns null if the event cannot be meaningfully parsed (malformed topic).
  */
@@ -264,7 +284,7 @@ export function parseEvent(raw: Record<string, unknown>): IndexedEvent | null {
 
   const address = topic[1]?.toString() ?? "";
   const ledger = typeof raw["ledger"] === "number" ? raw["ledger"] : 0;
-  const tx_hash = (raw["txHash"] ?? raw["id"] ?? "") as string;
+  const tx_hash = raw["txHash"] as string;
   const timestamp = parseTimestamp(raw);
   const amount = extractAmount(raw["value"]);
 
@@ -273,8 +293,8 @@ export function parseEvent(raw: Record<string, unknown>): IndexedEvent | null {
   const token = extractField(raw["value"], ["token", "asset"]);
   const result_code = extractField(raw["value"], ["result_code", "error", "error_code", "status"]);
 
-  // Stable dedup key: same tx + same event name = same row.
-  const id = `${tx_hash}:${event_name}`;
+  const id = stableEventKey(raw);
+  if (!id) return null;
 
   let raw_data: string;
   try {
@@ -358,7 +378,7 @@ export interface DedupIndexResult {
   written: number;
   /** Events skipped because the in-memory EventDedupCache had already seen them. */
   duplicatesSkipped: number;
-  /** Events that failed to parse (malformed topic) and were dropped. */
+  /** Events that failed to parse (malformed topic or id) and were dropped. */
   unparsed: number;
 }
 
@@ -392,9 +412,9 @@ export function indexEvents(
       continue;
     }
 
-    // checkAndRecord returns true when this (tx_hash, event_name, ledger)
-    // combination is already in the cache — skip the redundant DB write.
-    if (dedup.checkAndRecord(event.tx_hash, event.event_name, event.ledger)) {
+    // checkAndRecord returns true when this event (keyed by its stable id)
+    // is already in the cache — skip the redundant DB write.
+    if (dedup.checkAndRecord(event.id, event.event_name, event.ledger)) {
       duplicatesSkipped++;
       continue;
     }
@@ -417,8 +437,6 @@ let eventsSinceLastStatsLog = 0;
  * Log a periodic dedup-stats line and push a snapshot to metrics-server,
  * throttled to roughly every `DEDUP_STATS_LOG_INTERVAL` unique events.
  */
-async function pollOnce(db: DatabaseSync, fromLedger: number): Promise<number> {
-  logger.debug("Polling for events", { from_ledger: fromLedger });
 function maybeReportDedupStats(dedup: EventDedupCache, forceLog = false): void {
   const stats: DedupStats = dedup.stats;
 
@@ -429,34 +447,70 @@ function maybeReportDedupStats(dedup: EventDedupCache, forceLog = false): void {
   if (!forceLog && eventsSinceLastStatsLog < DEDUP_STATS_LOG_INTERVAL) return;
   eventsSinceLastStatsLog = 0;
 
-  log(
-    "info",
-    `[dedup] ${stats.deduplicatedTotal} duplicates skipped, ` +
-      `${stats.totalProcessed} unique processed, ` +
-      `${stats.size}/${stats.maxSize} cache entries, ` +
-      `${stats.evictions} evictions`,
-  );
+  logger.info("Dedup stats", {
+    duplicates_skipped: stats.deduplicatedTotal,
+    unique_processed: stats.totalProcessed,
+    cache_size: stats.size,
+    cache_max_size: stats.maxSize,
+    evictions: stats.evictions,
+  });
+}
+
+/** The subset of the RPC client pollOnce needs (injectable for tests). */
+export interface EventSource {
+  getEvents(request: rpc.Server.GetEventsRequest): Promise<rpc.Api.GetEventsResponse>;
 }
 
 /**
- * Fetch one page of events starting from `fromLedger`, deduplicate and
- * upsert them into the DB, and return the new cursor ledger to resume from
- * next time.
+ * Fetch every event from `fromLedger` up to the RPC's latest ledger (following
+ * the paging cursor across full pages), deduplicate and upsert them into the
+ * DB, and return the ledger to resume from next time.
+ *
+ * The result depends only on `fromLedger` and what the RPC returns: on success
+ * it is `latestLedger + 1`; on any RPC failure, or when there is no new ledger
+ * yet, it is `fromLedger` unchanged, so the cursor never skips ahead or moves
+ * back. Re-polling the same range is safe because rows are keyed by
+ * stableEventKey.
  */
-async function pollOnce(
+export async function pollOnce(
   db: DatabaseSync,
   fromLedger: number,
   dedup: EventDedupCache,
+  source: EventSource = server,
 ): Promise<number> {
-  log("debug", `Polling from ledger ${fromLedger}...`);
+  logger.debug("Polling for events", { from_ledger: fromLedger });
 
-  let response: Awaited<ReturnType<typeof server.getEvents>>;
+  const filters: rpc.Api.EventFilter[] = [{ type: "contract", contractIds: [CONTRACT_ID] }];
+  let latestLedger = 0;
+  let cursor: string | undefined;
+
   try {
-    response = await server.getEvents({
-      startLedger: fromLedger,
-      filters: [{ type: "contract", contractIds: [CONTRACT_ID] }],
-      limit: 200,
-    });
+    for (;;) {
+      const response = await source.getEvents(
+        cursor === undefined
+          ? { startLedger: fromLedger, filters, limit: EVENTS_PAGE_LIMIT }
+          : { cursor, filters, limit: EVENTS_PAGE_LIMIT },
+      );
+      latestLedger = Math.max(latestLedger, response.latestLedger);
+
+      const rawEvents = response.events as unknown as Record<string, unknown>[];
+      const { written, duplicatesSkipped, unparsed } = indexEvents(db, dedup, rawEvents);
+
+      if (written > 0 || duplicatesSkipped > 0) {
+        logger.info("Events upserted", {
+          ledger: fromLedger,
+          count: written,
+          duplicates_skipped: duplicatesSkipped,
+          unparsed,
+        });
+      }
+      eventsSinceLastStatsLog += written + duplicatesSkipped;
+
+      if (rawEvents.length < EVENTS_PAGE_LIMIT) break;
+      const next = rawEvents[rawEvents.length - 1]["pagingToken"];
+      if (typeof next !== "string" || !next || next === cursor) break;
+      cursor = next;
+    }
   } catch (err) {
     logger.error("RPC getEvents failed", {
       from_ledger: fromLedger,
@@ -466,32 +520,10 @@ async function pollOnce(
     return fromLedger;
   }
 
-  const rawEvents = response.events as unknown as Record<string, unknown>[];
-  const { written, duplicatesSkipped, unparsed } = indexEvents(db, dedup, rawEvents);
-
-  if (written > 0 || duplicatesSkipped > 0) {
-    log(
-      "info",
-      `Ledger ${fromLedger}: upserted ${written} event(s), ` +
-        `skipped ${duplicatesSkipped} duplicate(s)` +
-        (unparsed > 0 ? `, dropped ${unparsed} unparsable` : "") +
-        ".",
-    );
-  }
-
-  if (parsed.length > 0) {
-    const written = upsertEvents(db, parsed);
-    logger.info("Events upserted", { ledger: fromLedger, count: written });
-  }
-  eventsSinceLastStatsLog += written + duplicatesSkipped;
   maybeReportDedupStats(dedup);
 
-  // Advance cursor to latestLedger + 1 so the next poll only sees new ledgers.
-  // If the RPC returned no events it still advances, preventing stuck cursors.
-  const nextLedger =
-    response.latestLedger > 0 ? response.latestLedger + 1 : fromLedger + 1;
-
-  return nextLedger;
+  // Only advance past ledgers the RPC has confirmed it covered.
+  return latestLedger >= fromLedger ? latestLedger + 1 : fromLedger;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -518,21 +550,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  log("info", "FlowPay Event Indexer starting.");
-  log("info", `RPC:      ${RPC_URL}`);
-  log("info", `Contract: ${CONTRACT_ID}`);
-  log("info", `DB:       ${DB_FILE}`);
-  log("info", `Interval: ${POLL_INTERVAL_MS}ms`);
-
   const db = openDatabase(DB_FILE);
   initSchema(db);
 
   const dedup = new EventDedupCache();
-  log(
-    "info",
-    `Dedup cache: ${dedup.stats.maxSize} entries` +
-      (process.env.EVENT_DEDUP_TTL_MS ? `, TTL: ${process.env.EVENT_DEDUP_TTL_MS}ms` : ""),
-  );
+  logger.info("Dedup cache ready", {
+    max_size: dedup.stats.maxSize,
+    ttl_ms: process.env.EVENT_DEDUP_TTL_MS ?? 0,
+  });
 
   // Determine the ledger to resume from.
   const savedLedger = getMeta(db, "last_ledger");
