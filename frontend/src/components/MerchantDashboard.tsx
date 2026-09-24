@@ -3,6 +3,7 @@ import {
   getMerchantSubscribers,
   type MerchantSubscriber,
   buildBatchChargeTx,
+  buildWithdrawMerchantRevenueTx,
   simulateBatchCharge,
   type BatchChargeOutcome,
   getMerchantRevenue,
@@ -20,7 +21,7 @@ import EventFeed from "./EventFeed";
 import SubscriptionExport from "./SubscriptionExport";
 import { MerchantSubscriberSkeleton } from "./Skeleton";
 import ErrorRecovery from "./ErrorRecovery";
-
+import ConfirmModal from "./ConfirmModal";
 
 const SUBSCRIBER_ROW_HEIGHT = 72;
 const SUBSCRIBER_LIST_HEIGHT = 400;
@@ -37,7 +38,12 @@ function formatNextCharge(nextChargeAt: number): string {
   return date.toLocaleString();
 }
 
-export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger, isPaused = false }: Props) {
+export default function MerchantDashboard({
+  merchantKey,
+  onSign,
+  refreshTrigger,
+  isPaused = false,
+}: Props) {
   const [subscribers, setSubscribers] = useState<MerchantSubscriber[]>([]);
   const [revenue, setRevenue] = useState<bigint>(0n);
   const [revenueHistory, setRevenueHistory] = useState<bigint[]>([]);
@@ -45,6 +51,8 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
   const [error, setError] = useState<string | null>(null);
 
   const tx = useTransaction();
+  const withdrawTx = useTransaction();
+  const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
   const { isMobile } = useResponsive();
   const { displayCurrentAmount } = useAmountDisplay();
   const [outcomes, setOutcomes] = useState<Record<string, BatchChargeOutcome>>({});
@@ -112,6 +120,21 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
     }
   };
 
+  const handleWithdraw = async () => {
+    setShowWithdrawConfirm(false);
+
+    try {
+      await withdrawTx.submit(async () => {
+        return await onSign(await buildWithdrawMerchantRevenueTx(merchantKey));
+      });
+
+      // Success — refresh so revenue reflects the new (zero) balance
+      await refresh();
+    } catch (e) {
+      console.error("Withdraw failed:", e);
+    }
+  };
+
   if (loading) {
     return (
       <div className="dashboard">
@@ -146,10 +169,25 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
         </div>
       </div>
 
-      <div className={`merchant-stats-grid grid gap-4 mb-6${isMobile ? " grid-cols-1" : " grid-cols-2"}`}>
+      <div
+        className={`merchant-stats-grid grid gap-4 mb-6${isMobile ? " grid-cols-1" : " grid-cols-2"}`}
+      >
         <div className="card">
           <span className="text-sm text-muted block mb-1">Total Revenue</span>
           <span className="text-2xl font-bold">{displayCurrentAmount(revenue)}</span>
+          <button
+            className="btn-primary w-full mt-2"
+            data-testid="withdraw-revenue-button"
+            onClick={() => setShowWithdrawConfirm(true)}
+            disabled={revenue <= 0n || withdrawTx.status === "pending"}
+          >
+            {withdrawTx.status === "pending" ? "Withdrawing..." : "Withdraw Revenue"}
+          </button>
+          {withdrawTx.status === "success" && (
+            <p className="text-sm text-center mt-2" style={{ color: "var(--color-success)" }}>
+              Revenue withdrawn successfully!
+            </p>
+          )}
         </div>
         <div className="card">
           <span className="text-sm text-muted block mb-2">Last 7 Days Revenue</span>
@@ -157,14 +195,21 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
         </div>
       </div>
 
-      {error && (
-        <ErrorRecovery error={error} />
-      )}
+      {error && <ErrorRecovery error={error} />}
 
-      {tx.error && (
-        <ErrorRecovery error={tx.error} />
-      )}
+      {tx.error && <ErrorRecovery error={tx.error} />}
 
+      {withdrawTx.error && <ErrorRecovery error={withdrawTx.error} />}
+
+      {showWithdrawConfirm && (
+        <ConfirmModal
+          message={`Withdraw ${displayCurrentAmount(revenue)} to your wallet? This transfers your full accrued revenue balance and cannot be undone.`}
+          onConfirm={handleWithdraw}
+          onCancel={() => setShowWithdrawConfirm(false)}
+          confirmTestId="withdraw-confirm-button"
+          cancelTestId="withdraw-cancel-button"
+        />
+      )}
 
       {subscribers.length === 0 ? (
         <div className="card">
@@ -190,7 +235,9 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
                 className="btn-primary w-full"
                 onClick={handleBatchCharge}
                 disabled={tx.status === "pending" || isPaused}
-                aria-label={isPaused ? "Charge subscribers (unavailable during maintenance)" : undefined}
+                aria-label={
+                  isPaused ? "Charge subscribers (unavailable during maintenance)" : undefined
+                }
               >
                 {tx.status === "pending"
                   ? "Processing Batch Charge..."
@@ -230,10 +277,15 @@ export default function MerchantDashboard({ merchantKey, onSign, refreshTrigger,
                       <span className="merchant-row__address">
                         {formatAddress(entry.subscriber)}
                       </span>
-                      <CopyButton text={entry.subscriber} />
+                      <CopyButton
+                        text={entry.subscriber}
+                        ariaLabel={`Copy subscriber address ${entry.subscriber}`}
+                      />
                     </div>
                     <div className="merchant-subscriber-value">
-                      <span className="subscription-row__value">{displayCurrentAmount(entry.amount)}</span>
+                      <span className="subscription-row__value">
+                        {displayCurrentAmount(entry.amount)}
+                      </span>
                       <div className="merchant-subscriber-meta-right">
                         <span className="subscription-row__label">
                           Next charge {formatNextCharge(entry.nextChargeAt)}

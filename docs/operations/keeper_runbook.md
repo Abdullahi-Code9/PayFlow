@@ -623,7 +623,7 @@ Use this when billing is impaired, funds may be at risk, or the contract must be
 1. **Contract pause / health**
 
 ```bash
-soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- health_check
+soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- contract_health_check
 # Expected: healthy when operating normally
 ```
 
@@ -685,9 +685,18 @@ systemctl start payflow-keeper
 systemctl is-active payflow-keeper
 # Expected: active
 
-soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- health_check
+soroban contract invoke --id "$KEEPER_CONTRACT_ID" --network "$NETWORK" -- contract_health_check
 # Expected: healthy
 
 redis-cli LLEN keeper:dlq
 # Expected: trending to 0 after replay
 ```
+
+---
+
+## Related Documentation
+
+- Troubleshooting runbook: [`docs/operations/troubleshooting.md`](troubleshooting.md)
+- Error codes reference: [`docs/ERROR-CODES.md`](../ERROR-CODES.md)
+- Testing guide: [`docs/TESTING.md`](../TESTING.md)
+- Keeper guide: [`docs/KEEPER.md`](../KEEPER.md)

@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::{admin, events, referral, DataKey, Subscription};
+use crate::{admin, errors::ContractError, events, referral, DataKey, Subscription};
 
 /// v1 Subscription format (missing `paused` field)
 #[soroban_sdk::contracttype]
@@ -18,7 +18,6 @@ pub struct SubscriptionV1 {
 }
 
 /// Current storage schema version.
-#[allow(dead_code)]
 pub const CURRENT_VERSION: u32 = 3;
 
 /// Returns the stored schema version, defaulting to 0 (unmigrated).
@@ -36,6 +35,23 @@ fn set_schema_version(env: &Env, version: u32) {
         .set(&DataKey::SchemaVersion, &version);
 }
 
+/// Invariant guard: panics with `ContractError::SchemaMigrationRequired` when
+/// `schema_version < CURRENT_VERSION`. Call this at the top of any entrypoint
+/// that writes new subscription blobs (e.g. `subscribe_inner`) so that
+/// mixed-version storage can never be created after a WASM upgrade.
+///
+/// **Why this matters:** after a WASM upgrade the on-chain code knows the v3
+/// `Subscription` shape, but users whose slots have not yet been migrated still
+/// hold v1 or v2 blobs. Writing a fresh v3 blob for those users while others
+/// still hold older blobs is safe *for the new subscriber*, but operators who
+/// page through `migrate()` calls may read back a mix of shapes. Refusing all
+/// new writes until migration is complete removes the ambiguity entirely.
+pub fn require_current_version(env: &Env) {
+    if get_schema_version(env) < CURRENT_VERSION {
+        env.panic_with_error(ContractError::SchemaMigrationRequired);
+    }
+}
+
 /// Migrates contract storage to the latest schema version.
 ///
 /// v1 → v2: Introduces `SchemaVersion` tracking and transforms v1 Subscriptions to v2 (adding `paused: false`).
@@ -43,6 +59,21 @@ fn set_schema_version(env: &Env, version: u32) {
 ///
 /// Safe to call multiple times — subsequent calls are no-ops when already at CURRENT_VERSION.
 /// Only the contract admin can call this.
+///
+/// # Paged migration pattern
+///
+/// Because a contract upgrade may bring thousands of existing subscribers,
+/// migrating all of them in a single transaction is not safe (ledger CPU/size
+/// limits). The recommended operator workflow is:
+///
+/// 1. Upgrade the WASM (schema_version stays at whatever it was before).
+/// 2. Retrieve the full subscriber list via `get_subscriber_page` (50 per call).
+/// 3. Call `migrate(page)` for each page of addresses.
+/// 4. Once `get_schema_version() == CURRENT_VERSION` is confirmed on-chain,
+///    new subscribes are accepted again.
+///
+/// `migrate` is idempotent: calling it a second time with the same or an
+/// overlapping user list is a no-op for already-migrated slots.
 pub fn migrate(env: &Env, users: Vec<Address>) {
     admin::require_admin(env);
 
@@ -64,41 +95,13 @@ pub fn migrate(env: &Env, users: Vec<Address>) {
                     referrer: v1_sub.referrer,
                     label: v1_sub.label,
                     trial_duration: v1_sub.trial_duration,
+                    created_at: 0,
                 };
                 env.storage().persistent().set(&key, &v2_sub);
             }
         }
         version = 2;
     }
-    if version < 3 {
-    // v2 → v3: created_at field introduced; existing subscriptions
-    // are stamped with sentinel value 0 (age unknown)
-    set_schema_version(env, 3);
-}
-
-    let user_count = users.len();
-
-    // Transform provided users' data from v1 to v2
-    for user in users.into_iter() {
-        let key = DataKey::Subscription(user.clone());
-
-        // Attempt to read the entry as a V1 subscription
-        if let Some(v1_sub) = env.storage().persistent().get::<_, SubscriptionV1>(&key) {
-            let v2_sub = Subscription {
-                merchant: v1_sub.merchant,
-                amount: v1_sub.amount,
-                interval: v1_sub.interval,
-                last_charged: v1_sub.last_charged,
-                active: v1_sub.active,
-                paused: false, // new field in v2
-                token: v1_sub.token,
-                referrer: v1_sub.referrer,
-                label: v1_sub.label,
-                trial_duration: v1_sub.trial_duration,
-                created_at: 0, // sentinel — subscription existed before this field was tracked
-            };
-
-            env.storage().persistent().set(&key, &v2_sub);
     if version < 3 {
         let mut updated_count: u32 = 0;
         for user in users.into_iter() {

@@ -126,10 +126,7 @@ export default function NotificationCenter({
   }
 
   return (
-    <div
-      className="notification-center"
-      style={{ position: "relative", display: "inline-block" }}
-    >
+    <div className="notification-center" style={{ position: "relative", display: "inline-block" }}>
       {/* Bell trigger button */}
       <button
         ref={triggerRef}
@@ -254,9 +251,7 @@ export default function NotificationCenter({
                     opacity: n.read ? 0.8 : 1,
                   }}
                 >
-                  <div
-                    style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-2)" }}
-                  >
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-2)" }}>
                     <span aria-hidden="true">{variantIcon(n.variant)}</span>
                     <span style={{ flex: 1, fontSize: "0.875rem" }}>
                       <NotificationMessage message={n.message} />

@@ -1,5 +1,4 @@
-import { fireEvent, renderHook, render, screen } from "@testing-library/react";
-import React from "react";
+import { fireEvent, renderHook } from "@testing-library/react";
 import { vi, describe, it, expect } from "vitest";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 

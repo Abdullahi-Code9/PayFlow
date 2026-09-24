@@ -21,14 +21,13 @@ interface WalletBarProps {
 
 export default function WalletBar({
   publicKey,
+  activeAdapter,
   onDisconnect,
   notifications = [],
   unreadCount = 0,
   onMarkAllRead = () => {},
   onClearNotifications = () => {},
 }: WalletBarProps) {
-export default function WalletBar({ publicKey, activeAdapter, onDisconnect }: WalletBarProps) {
-
   const { queueDepth } = useTxQueue();
 
   return (

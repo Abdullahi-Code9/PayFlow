@@ -1,437 +1,273 @@
-/*
- * Chunk size note (Issue #445):
- *   Before lazy-loading:
- *     main chunk included MerchantDashboard (~8 KB) and SubscriptionHistory
- *     (~7.5 KB) regardless of the active tab, delaying initial parse.
- *   After lazy-loading:
- *     MerchantDashboard is split into a dedicated "merchant" chunk via the
- *     Vite chunk comment below. SubscriptionHistory is split into its own
- *     dynamic chunk. The main entry chunk no longer contains either component.
- */
-import React, { useState, useRef, lazy, Suspense } from "react";
-import { useWallet } from "./hooks/useWallet";
-import { useLocalStorage } from "./hooks/useLocalStorage";
-import { useResponsive } from "./hooks/useResponsive";
+import React, { useEffect, useRef, useState } from "react";
+import { useWallet, AVAILABLE_WALLETS } from "./hooks/useWallet";
 import { useAccessibility } from "./hooks/useAccessibility";
-import { useNetworkCheck } from "./hooks/useNetworkCheck";
-
-import { useContractId } from "./hooks/useContractId";
-import { useRpcHealth } from "./hooks/useRpcHealth";
-import { useSubscriberCount } from "./hooks/useSubscriberCount";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { useRegisterShortcuts } from "./context/ShortcutRegistry";
-import { useAnalytics } from "./hooks/useAnalytics";
-import { useNetworkStatus } from "./hooks/useNetworkStatus";
-import { useContractPaused } from "./hooks/useContractPaused";
-import OfflineBanner from "./components/OfflineBanner";
-import ContractPauseBanner from "./components/ContractPauseBanner";
-import AmountUnitToggle from "./components/AmountUnitToggle";
+import { useRpcHealthContext } from "./context/RpcHealthContext";
 import SubscribeForm from "./components/SubscribeForm";
 import Dashboard from "./components/Dashboard";
-import AdminDashboard from "./pages/AdminDashboard";
-import SystemHealthCard from "./components/SystemHealthCard";
-import TabBar from "./components/TabBar";
-import ConnectWallet from "./components/ConnectWallet";
-import WalletBar from "./components/WalletBar";
-import ErrorBoundary from "./components/ErrorBoundary";
-import TxQueuePanel from "./components/TxQueuePanel";
-import SubscriptionCardSkeleton from "./components/Skeleton";
-import ShortcutHelpOverlay from "./components/ShortcutHelpOverlay";
-import ThemeToggle from "./components/ThemeToggle";
-import WalletSelectModal from "./components/WalletSelectModal";
-import { AVAILABLE_WALLETS } from "./hooks/useWallet";
-import { WalletAdapter } from "./services/wallets/WalletAdapter";
-
 import RpcSettings from "./components/RpcSettings";
+import { useNetworkCheck } from "./hooks/useNetworkCheck";
+import { useNetworkStatus } from "./hooks/useNetworkStatus";
+import { useAdmin } from "./hooks/useAdmin";
+import { useContractId } from "./hooks/useContractId";
+import { useContractPaused } from "./hooks/useContractPaused";
+import { useToast } from "./hooks/useToast";
+import MerchantDashboard from "./components/MerchantDashboard";
+import WalletSelectModal from "./components/WalletSelectModal";
+import WalletBar from "./components/WalletBar";
+import TabBar from "./components/TabBar";
+import OfflineBanner from "./components/OfflineBanner";
+import ContractPauseBanner from "./components/ContractPauseBanner";
+import NetworkBadge from "./components/NetworkBadge";
+import AdminDashboard from "./pages/AdminDashboard";
+import type { WalletAdapter } from "./services/wallets/WalletAdapter";
 
-// Lazy-loaded components — split into separate chunks to keep the main bundle lean.
-// MerchantDashboard gets a dedicated Vite chunk name for easier bundle analysis.
-const MerchantDashboard = lazy(
-  () => import(/* @vite-chunk-name: "merchant" */ "./components/MerchantDashboard")
-);
-
-function HelpIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  );
-}
-
-function TabErrorFallback({ title, onRetry }: { title: string; onRetry: () => void }) {
-  return (
-    <div className="error-boundary">
-      <div className="card error-boundary__card">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="48"
-          height="48"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-danger)"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="error-boundary__icon"
-          aria-hidden="true"
-        >
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-        <h2 className="text-xl font-semibold mb-2">{title} encountered an error</h2>
-        <p className="text-muted text-sm mb-6">Try again to continue.</p>
-        <button className="btn-primary" onClick={onRetry}>
-          Retry
-        </button>
-      </div>
-    </div>
-  );
-}
+type Tab = "dashboard" | "subscribe" | "merchant" | "admin";
 
 export default function App() {
-  const { publicKey, connect, signAndSubmit, disconnect, error, connecting } = useWallet();
-  const { available: freighterAvailable, installUrl } = useFreighterAvailable();
-  const { publicKey, connect, signAndSubmit, disconnect, error, connecting, activeAdapter } = useWallet();
-  const { theme, toggle } = useTheme();
-
-  const { networkMatch, walletNetwork } = useNetworkCheck();
-  const { valid: contractIdValid, error: contractIdError } = useContractId();
-  const {
-    circuitOpen: rpcCircuitOpen,
-    status: rpcStatus,
-    latencyMs: rpcLatency,
-    error: rpcError,
-  } = useRpcHealth();
-  const { isMobile } = useResponsive();
+  const { publicKey, connect, disconnect, signAndSubmit, error, connecting, activeAdapter } =
+    useWallet();
   const { announcement, announce } = useAccessibility();
-  const { count: subscriberCount, loading: subscriberCountLoading } = useSubscriberCount();
-  const [tab, setTab] = useLocalStorage<"subscribe" | "dashboard" | "merchant" | "admin">(
-    "flowpay_tab",
-    "dashboard"
-  );
+  const { healthy, circuitOpen } = useRpcHealthContext();
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [refresh, setRefresh] = useState(0);
-  const [showHelp, setShowHelp] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false);
   const [showRpcSettings, setShowRpcSettings] = useState(false);
-  const { isOptedIn: analyticsEnabled, setOptIn: setAnalyticsOptIn, track } = useAnalytics();
+
+  const isRpcFailing = !healthy || circuitOpen;
+  const { networkMatch, walletNetwork, isMainnet, requiresMainnetConfirm, confirmMainnet } =
+    useNetworkCheck();
+  const { valid: isContractIdValid, error: contractIdError } = useContractId();
   const isOnline = useNetworkStatus();
+  const { isAdmin } = useAdmin(publicKey);
   const { isPaused } = useContractPaused();
+  // Dashboard/SubscribeForm/MerchantDashboard/admin panels each keep their own
+  // useToast() instance (and their own tests mock them independently), so
+  // centralizing every toast call site into one shared instance is out of
+  // scope here. This App-level instance exists solely to drive the header's
+  // NotificationCenter (issue #864).
+  const { notifications, unreadCount, markAllRead, clearNotifications } = useToast();
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  const wasOnline = useRef(isOnline);
 
-  const subscribeErrorBoundaryRef = useRef<ErrorBoundary>(null);
-  const dashboardErrorBoundaryRef = useRef<ErrorBoundary>(null);
-  const merchantErrorBoundaryRef = useRef<ErrorBoundary>(null);
-  const adminErrorBoundaryRef = useRef<ErrorBoundary>(null);
+  // Announce connectivity changes via the ARIA live region (issue: disable
+  // mutating CTAs while offline + announce status).
+  useEffect(() => {
+    if (wasOnline.current === isOnline) return;
+    wasOnline.current = isOnline;
+    announce(
+      isOnline
+        ? "Back online. Wallet actions are available again."
+        : "You are offline. Wallet actions are unavailable."
+    );
+  }, [isOnline, announce]);
 
-  // Global keyboard shortcuts
-  useRegisterShortcuts([
-    {
-      key: "1",
-      description: "Switch to Subscriber tab",
-      action: () => setTab("dashboard"),
-    },
-    {
-      key: "2",
-      description: "Switch to Merchant tab",
-      action: () => setTab("merchant"),
-    },
-    {
-      key: "3",
-      description: "Switch to Admin tab",
-      action: () => setTab("admin"),
-    },
-    {
-      key: "d",
-      description: "Switch to Dashboard",
-      action: () => setTab("dashboard"),
-    },
-    {
-      key: "s",
-      description: "Switch to Subscribe",
-      action: () => setTab("subscribe"),
-    },
-    {
-      key: "m",
-      description: "Switch to Merchant",
-      action: () => setTab("merchant"),
-    },
-    {
-      key: "a",
-      description: "Switch to Admin",
-      action: () => setTab("admin"),
-    },
-    {
-      key: "n",
-      description: "New Subscription form",
-      action: () => {
-        if (!showHelp) setTab("subscribe");
-      },
-    },
-    {
-      key: "r",
-      description: "Refresh current tab",
-      action: () => setRefresh((r) => r + 1),
-    },
-    {
-      key: "?",
-      description: "Show keyboard shortcuts",
-      action: () => setShowHelp((prev) => !prev),
-    },
-  ]);
+  // Combine configuration and network validation into a single actionable gate
+  let gatePassed = true;
+  let gateError: string | null = null;
 
-  const shortcuts = useKeyboardShortcuts({
-    enabled: !!publicKey,
-  });
-
-  async function handleConnectWallet(adapter: WalletAdapter) {
-    setShowWalletModal(false);
-    await connect(adapter);
-    track({ type: "wallet_connected" });
+  if (!isContractIdValid) {
+    gatePassed = false;
+    gateError = contractIdError;
+  } else if (publicKey && !networkMatch) {
+    gatePassed = false;
+    gateError = `Wallet is on "${walletNetwork}" — app expects a different network. Please switch your wallet network to match "${import.meta.env.VITE_NETWORK_PASSPHRASE || "testnet"}".`;
   }
 
+  useEffect(() => {
+    if (gateError) {
+      announce?.(`Configuration Warning: ${gateError}`);
+    }
+  }, [gateError, announce]);
+
+  async function handleSelectWallet(adapter: WalletAdapter) {
+    setShowWalletModal(false);
+    await connect(adapter);
+  }
+
+  // Admin tab is only included when the connected wallet is the contract admin
+  const visibleTabs: readonly Tab[] = isAdmin
+    ? (["dashboard", "subscribe", "merchant", "admin"] as const)
+    : (["dashboard", "subscribe", "merchant"] as const);
 
   return (
-    <div className={`app-shell${isMobile ? " app-shell--mobile" : ""}`}>
+    <div style={{ maxWidth: 480, margin: "60px auto", padding: "0 16px" }}>
+      {/* Contract pause banner — rendered first so it takes precedence over
+          everything else, including toasts (see index.css stacking rules). */}
+      <ContractPauseBanner paused={isPaused} />
+
       {/* ARIA live region for screen reader announcements */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {announcement}
       </div>
 
-      {/* Header */}
-      <div className="app-header">
-        <div>
-          <h1 className="app-header__title">⚡ FlowPay</h1>
-          <p className="app-header__subtitle">
-            Decentralized recurring payments on Stellar
-            {!subscriberCountLoading && (
-              <span style={{ marginLeft: "8px", opacity: 0.7 }}>
-                • {subscriberCount} active subscriber{subscriberCount !== 1 ? "s" : ""}
-              </span>
-            )}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {/* Amount unit toggle — switches all amount displays between XLM and STROOP */}
-          <AmountUnitToggle />
-          {publicKey && (
-            <button
-              className="btn-secondary theme-toggle"
-              onClick={() => setShowHelp((prev) => !prev)}
-              aria-label="Show keyboard shortcuts"
-              title="Keyboard shortcuts (?)"
-            >
-              <HelpIcon />
-            </button>
-          )}
-          <ThemeToggle />
+      <OfflineBanner visible={!isOnline} />
+
+      {/* Header — NetworkBadge is persistent in shell so users always see Testnet/Mainnet */}
+      <div style={{ marginBottom: 32, textAlign: "center" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: "#a78bfa" }}>⚡ FlowPay</h1>
+        <p style={{ color: "#64748b", marginTop: 6, fontSize: 14 }}>
+          Decentralized recurring payments on Stellar
+        </p>
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
+          <NetworkBadge />
         </div>
       </div>
 
-      {/* Keyboard shortcuts help */}
-      {showHelp && publicKey && (
-        <ShortcutHelpOverlay shortcuts={shortcuts} onClose={() => setShowHelp(false)} />
-      )}
-
-      {/* Offline banner — shown when navigator.onLine is false */}
-      <OfflineBanner visible={!isOnline} />
-
-      {/* Contract pause banner — shown when is_contract_paused returns true */}
-      <ContractPauseBanner paused={isPaused} />
-
-      {/* Contract ID error */}
-      {!contractIdValid && contractIdError && (
-        <div className="network-warning" role="alert">
-          <span>❌</span>
-          <span>{contractIdError}</span>
+      {/* Actionable gate warning banner */}
+      {gateError && (
+        <div
+          className="card"
+          style={{ background: "#3b1f1f", marginBottom: 16, textAlign: "center" }}
+          data-testid="gate-warning"
+        >
+          <p style={{ color: "#f87171", fontSize: 13 }}>
+            ⚠ <strong>Configuration/Network Gate Warning:</strong> {gateError}
+          </p>
         </div>
       )}
 
-      {/* RPC health warning */}
-      {rpcStatus === "degraded" && (
-        <div className="network-warning network-warning--degraded" role="alert">
-          <span>⚠️</span>
-          <span>RPC connection degraded: Latency is high ({rpcLatency}ms)</span>
-        </div>
-      )}
-      {rpcStatus === "unreachable" && rpcError && (
-        <div className="network-warning" role="alert">
-          <span>{rpcCircuitOpen ? "🔴" : "⚠️"}</span>
-          <span>
-            {rpcCircuitOpen
-              ? `RPC circuit open — all requests blocked: ${rpcError}`
-              : `RPC endpoint unreachable: ${rpcError}`}
-            {" "}
-            <button
-              className="btn-secondary"
-              style={{ marginLeft: "8px", fontSize: "12px", padding: "2px 10px" }}
-              onClick={() => setShowRpcSettings(true)}
-              data-testid="rpc-failure-banner-change-btn"
-              aria-label="Try a different RPC endpoint"
-            >
-              Try a different endpoint
-            </button>
+      {/* RPC Failure Banner */}
+      {isRpcFailing && (
+        <div
+          role="alert"
+          data-testid="rpc-failure-banner"
+          className="card"
+          style={{
+            background: "var(--color-danger-bg, #451a1a)",
+            color: "var(--color-danger-text, #f87171)",
+            border: "1px solid var(--color-danger, #ef4444)",
+            marginBottom: "20px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+            padding: "12px 16px",
+          }}
+        >
+          <span style={{ fontSize: 13 }}>
+            ⚠️ RPC endpoint is unreachable. Try a different endpoint.
           </span>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowRpcSettings(true)}
+            data-testid="rpc-failure-banner-change-btn"
+            aria-label="Try a different RPC endpoint"
+            style={{ fontSize: 12, padding: "4px 8px", whiteSpace: "nowrap" }}
+          >
+            Try a different endpoint
+          </button>
         </div>
       )}
+
+      {/* Mainnet safety gate — require explicit confirmation once per session when passphrase is mainnet */}
+      {isMainnet && requiresMainnetConfirm && (
+        <div
+          className="card"
+          style={{ background: "#3b1f1f", borderColor: "#7f1d1d", marginBottom: 16 }}
+        >
+          <p style={{ color: "#fbbf24", fontSize: 13, fontWeight: 600 }}>
+            ⚠ Mainnet mode — real funds at risk. Please confirm you intend to use Mainnet before
+            continuing.
+          </p>
+          <button
+            onClick={confirmMainnet}
+            className="btn-primary"
+            style={{ marginTop: 12 }}
+            data-testid="confirm-mainnet-btn"
+          >
+            I understand, continue on Mainnet
+          </button>
+        </div>
+      )}
+
       {showRpcSettings && <RpcSettings onClose={() => setShowRpcSettings(false)} />}
-      {publicKey && !networkMatch && (
-        <div className="network-warning" role="alert">
-          <span>⚠️</span>
-          <span>
-            Wallet is on <strong>{walletNetwork}</strong> — app expects a different network. Switch
-            networks in Freighter to continue.
-          </span>
-        </div>
-      )}
 
-      {/* Not connected */}
-      {!publicKey && (
-        <>
-          <div className="card connect-wallet">
-            <p className="connect-wallet__hint">
-              Help improve FlowPay with optional anonymous usage analytics.
+      {/* Wallet connect */}
+      {!publicKey ? (
+        <div className="card" style={{ textAlign: "center" }}>
+          <p style={{ color: "#94a3b8", marginBottom: 16, fontSize: 14 }}>
+            Connect a wallet to get started.
+          </p>
+          <button
+            onClick={() => setShowWalletModal(true)}
+            disabled={connecting}
+            style={{ background: "#7c3aed", color: "#fff" }}
+          >
+            {connecting ? "Connecting…" : "Connect Wallet"}
+          </button>
+          {error && (
+            <p role="alert" style={{ color: "#f87171", marginTop: 12, fontSize: 13 }}>
+              {error}
             </p>
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
-              <button
-                className={`btn-secondary${analyticsEnabled ? " active" : ""}`}
-                onClick={() => setAnalyticsOptIn(true)}
-                type="button"
-              >
-                Opt in
-              </button>
-              <button
-                className={`btn-secondary${!analyticsEnabled ? " active" : ""}`}
-                onClick={() => setAnalyticsOptIn(false)}
-                type="button"
-              >
-                Keep disabled
-              </button>
-            </div>
-          </div>
-          <ConnectWallet onConnect={() => setShowWalletModal(true)} error={error} loading={connecting} />
-        </>
-      )}
-
-      {showWalletModal && (
-        <WalletSelectModal 
-          adapters={AVAILABLE_WALLETS} 
-          onSelect={handleConnectWallet} 
-          onClose={() => setShowWalletModal(false)} 
-        />
-      )}
-
-      {/* Connected */}
-      {publicKey && (
+          )}
+        </div>
+      ) : (
         <>
-          <WalletBar publicKey={publicKey} activeAdapter={activeAdapter} onDisconnect={disconnect} />
-
-
-          {/* Tabs */}
-          <TabBar
-            tabs={["dashboard", "subscribe", "merchant", "admin"]}
-            activeTab={tab}
-            onTabChange={setTab}
+          {/* Connected bar — shows adapter name/icon, address, disconnect */}
+          <WalletBar
+            publicKey={publicKey}
+            activeAdapter={activeAdapter}
+            onDisconnect={disconnect}
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onMarkAllRead={markAllRead}
+            onClearNotifications={clearNotifications}
           />
 
+          {/* Tab navigation — admin tab only visible to contract admin */}
+          <TabBar tabs={visibleTabs} activeTab={tab} onTabChange={setTab} />
+
           {/* Content */}
-          <div className="card">
-            {tab === "subscribe" ? (
-              <ErrorBoundary
-                ref={subscribeErrorBoundaryRef}
-                fallback={
-                  <TabErrorFallback
-                    title="Subscribe Form"
-                    onRetry={() => subscribeErrorBoundaryRef.current?.reset()}
-                  />
-                }
-              >
-                <SubscribeForm
-                  userKey={publicKey}
-                  onSign={signAndSubmit}
-                  onSubscribed={() => track({ type: "subscription_created" })}
-                  onSuccess={() => {
-                    setTab("dashboard");
-                    setRefresh((r) => r + 1);
-                  }}
-                  announce={announce}
-                  isPaused={isPaused}
-                />
-              </ErrorBoundary>
-            ) : tab === "merchant" ? (
-              <ErrorBoundary
-                ref={merchantErrorBoundaryRef}
-                fallback={
-                  <TabErrorFallback
-                    title="Merchant Dashboard"
-                    onRetry={() => merchantErrorBoundaryRef.current?.reset()}
-                  />
-                }
-              >
-                <Suspense fallback={<SubscriptionCardSkeleton />}>
-                  <MerchantDashboard
-                    merchantKey={publicKey}
-                    onSign={signAndSubmit}
-                    refreshTrigger={refresh}
-                    isPaused={isPaused}
-                  />
-                </Suspense>
-              </ErrorBoundary>
-            ) : tab === "admin" ? (
-              <ErrorBoundary
-                ref={adminErrorBoundaryRef}
-                fallback={
-                  <TabErrorFallback
-                    title="Admin Dashboard"
-                    onRetry={() => adminErrorBoundaryRef.current?.reset()}
-                  />
-                }
-              >
-                <>
-                  <SystemHealthCard callerKey={publicKey} />
-                  <AdminDashboard publicKey={publicKey} onSign={signAndSubmit} />
-                </>
-              </ErrorBoundary>
-            ) : (
-              <ErrorBoundary
-                ref={dashboardErrorBoundaryRef}
-                fallback={
-                  <TabErrorFallback
-                    title="Dashboard"
-                    onRetry={() => dashboardErrorBoundaryRef.current?.reset()}
-                  />
-                }
-              >
-                <Dashboard
-                  userKey={publicKey}
-                  onSign={signAndSubmit}
-                  refreshTrigger={refresh}
-                  announce={announce}
-                  onCancelled={() => track({ type: "subscription_cancelled" })}
-                  onPayPerUse={(amount) =>
-                    track({ type: "pay_per_use", payload: { amountStroops: amount } })
-                  }
-                  isPaused={isPaused}
-                />
-              </ErrorBoundary>
+          <div className="card" style={{ marginTop: 20 }}>
+            {tab === "subscribe" && (
+              <SubscribeForm
+                userKey={publicKey}
+                onSign={signAndSubmit}
+                onSuccess={() => {
+                  setTab("dashboard");
+                  setRefresh((r) => r + 1);
+                }}
+                isPaused={!gatePassed}
+                announce={announce}
+                isOffline={!isOnline}
+              />
+            )}
+            {tab === "dashboard" && (
+              <Dashboard
+                userKey={publicKey}
+                onSign={signAndSubmit}
+                refreshTrigger={refresh}
+                announce={announce}
+                isPaused={!gatePassed}
+                isOffline={!isOnline}
+              />
+            )}
+            {tab === "merchant" && (
+              <MerchantDashboard
+                merchantKey={publicKey}
+                onSign={signAndSubmit}
+                refreshTrigger={refresh}
+                isPaused={isPaused}
+              />
+            )}
+            {tab === "admin" && isAdmin && (
+              <AdminDashboard
+                publicKey={publicKey}
+                onSign={signAndSubmit}
+                gatePassed={gatePassed}
+              />
             )}
           </div>
         </>
       )}
 
-      {/* Fixed transaction queue panel — visible whenever there is at least one tx */}
-      <TxQueuePanel />
+      {/* Wallet selector modal — rendered at root so it overlays everything */}
+      {showWalletModal && (
+        <WalletSelectModal
+          adapters={AVAILABLE_WALLETS}
+          onSelect={handleSelectWallet}
+          onClose={() => setShowWalletModal(false)}
+        />
+      )}
     </div>
   );
 }

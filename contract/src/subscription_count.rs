@@ -1,5 +1,7 @@
 use soroban_sdk::{Address, Env};
 
+use crate::errors::ContractError;
+use crate::storage;
 use crate::{DataKey, SUBSCRIPTION_TTL_LEDGERS};
 
 /// Returns the current number of active subscriptions.
@@ -81,10 +83,72 @@ pub fn remove_subscriber_index(env: &Env, user: &Address) {
     }
 }
 
+/// Moves an active subscriber's index membership to `new_user`.
+///
+/// Transfers preserve the active and merchant counts, but the append-only
+/// index must still stop pointing at the old owner.
+pub fn transfer_subscriber_index(env: &Env, user: &Address, new_user: &Address) {
+    remove_subscriber_index(env, user);
+
+    let new_slot_key = DataKey::SubscriberIndexSlot(new_user.clone());
+    if let Some(slot) = env.storage().persistent().get::<DataKey, u64>(&new_slot_key) {
+        if !is_subscriber_index_removed(env, slot) {
+            return;
+        }
+        env.storage().persistent().remove(&new_slot_key);
+    }
+
+    append_subscriber_index(env, new_user);
+}
+
 /// Returns whether the subscriber index slot at `index` has been pruned.
 pub fn is_subscriber_index_removed(env: &Env, index: u64) -> bool {
     env.storage()
         .persistent()
         .get(&DataKey::SubscriberIndexRemoved(index))
         .unwrap_or(false)
+}
+
+/// Admin repair: tombstones a single stale subscriber index slot.
+///
+/// Validates that the address stored at `index` does **not** currently have
+/// an active subscription. Does not scan or garbage-collect the rest of the
+/// index. Returns the subscriber address that occupied the slot.
+///
+/// # Errors
+///
+/// - `NoSubscriptionFound` if `index` is out of range, empty, or already
+///   tombstoned.
+/// - `CannotClearActiveSubscriber` if the occupant still has an active
+///   subscription.
+pub fn clear_subscriber_index_entry(env: &Env, index: u64) -> Address {
+    let size = get_subscriber_index_size(env);
+    if index >= size || is_subscriber_index_removed(env, index) {
+        env.panic_with_error(ContractError::NoSubscriptionFound);
+    }
+
+    let user: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::SubscriberIndex(index))
+        .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
+
+    if let Some(sub) = storage::get_subscription(env, &user) {
+        if sub.active {
+            env.panic_with_error(ContractError::CannotClearActiveSubscriber);
+        }
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::SubscriberIndexRemoved(index), &true);
+
+    let slot_key = DataKey::SubscriberIndexSlot(user.clone());
+    if let Some(slot) = env.storage().persistent().get::<DataKey, u64>(&slot_key) {
+        if slot == index {
+            env.storage().persistent().remove(&slot_key);
+        }
+    }
+
+    user
 }

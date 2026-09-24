@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { nativeToScVal, Address } from "@stellar/stellar-sdk";
 import { ScValDecoder, ScValDecodeError } from "../services/scval";
@@ -6,16 +7,36 @@ import { ScValDecoder, ScValDecodeError } from "../services/scval";
 vi.mock("@stellar/stellar-sdk/rpc", () => {
   return {
     Server: class {
+      url: string;
+      constructor(url: string) {
+        this.url = url;
+      }
       getEvents = vi.fn();
       simulateTransaction = vi.fn();
       getAccount = vi.fn().mockResolvedValue({ id: "mock-account" });
+      getHealth = vi.fn().mockResolvedValue({});
+      getTransaction = vi.fn().mockResolvedValue({ status: "SUCCESS", events: [] });
     },
-    assembleTransaction: vi.fn(),
+    assembleTransaction: vi.fn().mockReturnValue({ toXDR: () => "assembled-xdr" }),
   };
 });
 
 // Import the implementation AFTER the mock block is securely established
-import { fetchEvents, getChargeHistory, server } from "../stellar";
+import {
+  fetchEvents,
+  getChargeHistory,
+  server,
+  getServer,
+  chargeSimBlocksPay,
+  chargeSimIsRisky,
+  decodeChargeSimResult,
+  isSubscriptionHealthy,
+  normalizeSubscriptionHealth,
+  payBlockedReason,
+  payWarningReason,
+  subscriptionHasWarnings,
+  subscriptionHealthBlocksPay,
+} from "../stellar";
 
 const getEventsMock = server.getEvents as ReturnType<typeof vi.fn>;
 
@@ -529,5 +550,118 @@ describe("rpcCache — dedupedCall deduplication & TTL", () => {
     const result = await dedupedCall("test:reject", fn);
     expect(callCount).toBe(2);
     expect(result).toBe("ok");
+  });
+});
+
+// ── getServer resolution tests ────────────────────────────────────────────────
+//
+// Verifies that getServer() honours a custom RPC URL and that build/simulate
+// helpers invoke getServer() rather than the module-level singleton.
+
+describe("getServer — URL resolution", () => {
+  const CUSTOM_URL = "https://custom-rpc.example.com";
+
+  afterEach(() => {
+    // Clean up shimmed localStorage after each test
+    delete (globalThis as any).localStorage;
+    vi.restoreAllMocks();
+  });
+
+  it("returns the module singleton when localStorage is unavailable", () => {
+    // No localStorage shim — getServer must fall back gracefully
+    delete (globalThis as any).localStorage;
+    const s = getServer();
+    expect(s).toBe(server);
+  });
+
+  it("returns the module singleton when no custom URL key is present", () => {
+    (globalThis as any).localStorage = {
+      getItem: vi.fn().mockReturnValue(null),
+    };
+    const s = getServer();
+    expect(s).toBe(server);
+  });
+
+  it("returns a new Server pointing at the custom URL when one is stored", () => {
+    (globalThis as any).localStorage = {
+      getItem: vi.fn().mockReturnValue(JSON.stringify(CUSTOM_URL)),
+    };
+    const s = getServer();
+    expect(s).not.toBe(server);
+    expect((s as unknown as { url: string }).url).toBe(CUSTOM_URL);
+  });
+
+  it("falls back to the singleton when localStorage contains invalid JSON", () => {
+    (globalThis as any).localStorage = {
+      getItem: vi.fn().mockReturnValue("not-valid-json{{{"),
+    };
+    const s = getServer();
+    expect(s).toBe(server);
+  });
+});
+
+describe("subscription health helpers", () => {
+  const healthy = {
+    active: true,
+    charge_due: false,
+    within_grace: false,
+    has_sufficient_allowance: true,
+    is_paused: false,
+    trial_active: false,
+    daily_limit_set: false,
+  };
+
+  it("treats a fully healthy subscription as healthy", () => {
+    expect(isSubscriptionHealthy(healthy)).toBe(true);
+    expect(subscriptionHasWarnings(healthy)).toBe(false);
+    expect(subscriptionHealthBlocksPay(healthy)).toBe(false);
+    expect(payBlockedReason(healthy, "WouldSucceed")).toBeNull();
+    expect(payWarningReason(healthy, "WouldSucceed")).toBeNull();
+  });
+
+  it("flags paused and inactive as blocking pay", () => {
+    expect(subscriptionHealthBlocksPay({ ...healthy, is_paused: true })).toBe(true);
+    expect(subscriptionHealthBlocksPay({ ...healthy, active: false })).toBe(true);
+    expect(chargeSimBlocksPay("SubscriptionPaused")).toBe(true);
+    expect(chargeSimBlocksPay("WouldSucceed")).toBe(false);
+  });
+
+  it("warns on insufficient allowance and grace without blocking pay", () => {
+    expect(subscriptionHealthBlocksPay({ ...healthy, has_sufficient_allowance: false })).toBe(
+      false
+    );
+    expect(payWarningReason({ ...healthy, has_sufficient_allowance: false }, null)).toMatch(
+      /allowance is insufficient/i
+    );
+    expect(payWarningReason({ ...healthy, within_grace: true }, null)).toMatch(/grace period/i);
+    expect(chargeSimIsRisky("InsufficientAllowance")).toBe(true);
+    expect(chargeSimIsRisky("NotDue")).toBe(false);
+  });
+
+  it("decodes ChargeSimResult from a symbol or vec-wrapped symbol", () => {
+    const asSymbol = nativeToScVal("WouldSucceed", { type: "symbol" });
+    expect(decodeChargeSimResult(asSymbol)).toBe("WouldSucceed");
+
+    const asVec = nativeToScVal(["GracePeriodElapsed"], { type: "symbol" });
+    expect(decodeChargeSimResult(asVec)).toBe("GracePeriodElapsed");
+
+    expect(decodeChargeSimResult(nativeToScVal("NotAVariant", { type: "symbol" }))).toBeNull();
+  });
+
+  it("normalizes partial health maps onto contract fields", () => {
+    expect(
+      normalizeSubscriptionHealth({
+        has_sufficient_allowance: true,
+        is_paused: true,
+      })
+    ).toEqual({
+      active: false,
+      charge_due: false,
+      within_grace: false,
+      has_sufficient_allowance: true,
+      is_paused: true,
+      trial_active: false,
+      daily_limit_set: false,
+    });
   });
 });

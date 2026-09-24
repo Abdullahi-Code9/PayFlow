@@ -14,6 +14,10 @@ import React, { useMemo, useState } from "react";
 import type { MerchantSubscriber } from "../stellar";
 import { formatAddress, formatXlm } from "../utils/format";
 import CopyButton from "./CopyButton";
+import { useVirtualList } from "../hooks/useVirtualList";
+
+const ROW_HEIGHT = 56;
+const CONTAINER_HEIGHT = 480;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,7 +63,11 @@ export function deriveStatus(nextChargeAt: number): "active" | "overdue" {
 
 function SortIcon({ field, sort }: { field: SortField; sort: SortState }) {
   if (sort.field !== field) {
-    return <span className="sort-icon sort-icon--inactive" aria-hidden="true">⇅</span>;
+    return (
+      <span className="sort-icon sort-icon--inactive" aria-hidden="true">
+        ⇅
+      </span>
+    );
   }
   return (
     <span className="sort-icon sort-icon--active" aria-hidden="true">
@@ -77,9 +85,7 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
   // ── Filter ────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     if (filter === "all") return subscribers;
-    return subscribers.filter(
-      (s) => deriveStatus(s.nextChargeAt) === filter
-    );
+    return subscribers.filter((s) => deriveStatus(s.nextChargeAt) === filter);
   }, [subscribers, filter]);
 
   // ── Sort ──────────────────────────────────────────────────────────────────
@@ -104,6 +110,17 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
     return copy;
   }, [filtered, sort]);
 
+  // ── Virtualize the sorted/filtered rows so large lists stay smooth ──────────
+  const { visibleItems, totalHeight, offsetY, onScroll } = useVirtualList(
+    sorted,
+    ROW_HEIGHT,
+    CONTAINER_HEIGHT
+  );
+  const bottomSpacerHeight = Math.max(
+    totalHeight - offsetY - visibleItems.length * ROW_HEIGHT,
+    0
+  );
+
   // ── Sort toggle ───────────────────────────────────────────────────────────
   function toggleSort(field: SortField) {
     setSort((prev) =>
@@ -127,7 +144,9 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
   if (subscribers.length === 0) {
     return (
       <div className="mst-empty" data-testid="mst-empty-state">
-        <p className="text-muted">No subscribers yet. Share your merchant address to get started.</p>
+        <p className="text-muted">
+          No subscribers yet. Share your merchant address to get started.
+        </p>
       </div>
     );
   }
@@ -141,8 +160,8 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
             f === "all"
               ? `All (${subscribers.length})`
               : f === "active"
-              ? `Active (${activeCount})`
-              : `Overdue (${overdueCount})`;
+                ? `Active (${activeCount})`
+                : `Overdue (${overdueCount})`;
           return (
             <button
               key={f}
@@ -166,11 +185,21 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
 
       {/* Table */}
       {sorted.length > 0 && (
-        <div className="mst-scroll-container">
-          <table className="mst-table" aria-label="Merchant subscriber list">
+        <div
+          className="mst-scroll-container"
+          onScroll={onScroll}
+          style={{ maxHeight: CONTAINER_HEIGHT, overflowY: "auto" }}
+        >
+          <table
+            className="mst-table"
+            aria-label="Merchant subscriber list"
+            aria-rowcount={sorted.length}
+          >
             <thead>
               <tr className="mst-head-row">
-                <th scope="col" className="mst-th">Subscriber Address</th>
+                <th scope="col" className="mst-th">
+                  Subscriber Address
+                </th>
                 <th
                   scope="col"
                   className="mst-th mst-th--sortable"
@@ -189,8 +218,12 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
                   Amount (XLM)
                   <SortIcon field="amount" sort={sort} />
                 </th>
-                <th scope="col" className="mst-th">Interval</th>
-                <th scope="col" className="mst-th">Last Charged</th>
+                <th scope="col" className="mst-th">
+                  Interval
+                </th>
+                <th scope="col" className="mst-th">
+                  Last Charged
+                </th>
                 <th
                   scope="col"
                   className="mst-th mst-th--sortable"
@@ -209,23 +242,29 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
                   Next Charge
                   <SortIcon field="nextCharge" sort={sort} />
                 </th>
-                <th scope="col" className="mst-th">Status</th>
+                <th scope="col" className="mst-th">
+                  Status
+                </th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((sub) => {
+              {offsetY > 0 && (
+                <tr aria-hidden="true" style={{ height: offsetY }}>
+                  <td colSpan={6} style={{ padding: 0, border: "none" }} />
+                </tr>
+              )}
+              {visibleItems.map(({ item: sub, index }) => {
                 const status = deriveStatus(sub.nextChargeAt);
                 return (
                   <tr
                     key={sub.subscriber}
                     className={`mst-row mst-row--${status}`}
                     data-testid={`mst-row-${sub.subscriber}`}
+                    aria-rowindex={index + 1}
                   >
                     {/* Subscriber address */}
                     <td className="mst-cell mst-cell--address">
-                      <span className="mst-address">
-                        {formatAddress(sub.subscriber, 8, 6)}
-                      </span>
+                      <span className="mst-address">{formatAddress(sub.subscriber, 8, 6)}</span>
                       <CopyButton
                         text={sub.subscriber}
                         ariaLabel={`Copy subscriber address ${sub.subscriber}`}
@@ -233,24 +272,16 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
                     </td>
 
                     {/* Amount */}
-                    <td className="mst-cell mst-cell--amount">
-                      {formatXlm(sub.amount)}
-                    </td>
+                    <td className="mst-cell mst-cell--amount">{formatXlm(sub.amount)}</td>
 
                     {/* Interval */}
-                    <td className="mst-cell">
-                      {formatInterval(sub.interval)}
-                    </td>
+                    <td className="mst-cell">{formatInterval(sub.interval)}</td>
 
                     {/* Last charged */}
-                    <td className="mst-cell mst-cell--date">
-                      {formatDate(sub.lastCharged)}
-                    </td>
+                    <td className="mst-cell mst-cell--date">{formatDate(sub.lastCharged)}</td>
 
                     {/* Next charge */}
-                    <td className="mst-cell mst-cell--date">
-                      {formatDate(sub.nextChargeAt)}
-                    </td>
+                    <td className="mst-cell mst-cell--date">{formatDate(sub.nextChargeAt)}</td>
 
                     {/* Status badge */}
                     <td className="mst-cell">
@@ -264,6 +295,11 @@ export default function MerchantSubscriberTable({ subscribers }: Props) {
                   </tr>
                 );
               })}
+              {bottomSpacerHeight > 0 && (
+                <tr aria-hidden="true" style={{ height: bottomSpacerHeight }}>
+                  <td colSpan={6} style={{ padding: 0, border: "none" }} />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

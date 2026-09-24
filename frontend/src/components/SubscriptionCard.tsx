@@ -19,16 +19,26 @@ import React, { useEffect, useState } from "react";
 import CopyButton from "./CopyButton";
 import NextChargeCountdown from "./NextChargeCountdown";
 import IncreaseAllowanceModal from "./IncreaseAllowanceModal";
+import TransferSubscriptionModal from "./TransferSubscriptionModal";
 import ErrorRecovery from "./ErrorRecovery";
 import SubscriptionHealthWidget from "./SubscriptionHealthWidget";
 import { Subscription } from "../types";
-import { BILLING_INTERVALS, STROOPS_PER_XLM } from "../constants";
-import { getAllowance, getTrialEnd, buildCancelTx } from "../stellar";
+import { BILLING_INTERVALS } from "../constants";
+import {
+  ChargeSimResult,
+  getAllowance,
+  getTrialEnd,
+  buildCancelTx,
+  isSubscriptionHealthy,
+  subscriptionHasWarnings,
+  SubscriptionHealth,
+} from "../stellar";
 import { useSubscriptionSync } from "../hooks/useSubscriptionSync";
 import { usePauseResume } from "../hooks/usePauseResume";
 import { useRegisterShortcuts } from "../context/ShortcutRegistry";
 import { useResponsive } from "../hooks/useResponsive";
 import { useAmountDisplay } from "../hooks/useAmountDisplay";
+import { useToast } from "../hooks/useToast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -40,6 +50,9 @@ interface SubscriptionCardProps {
   onSign: (xdr: string) => Promise<string>;
   onRefresh: () => void;
   onCancelled?: () => void;
+  showSimulateCharge?: boolean;
+  onHealthChange?: (health: SubscriptionHealth | null) => void;
+  onSimulateResult?: (result: ChargeSimResult | null) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -54,33 +67,11 @@ function formatInterval(secs: number): string {
   return `${secs}s`;
 }
 
-function formatTrialStatus(
-  trial_duration: number,
-  last_charged: number
-): { isInTrial: boolean; trialEndDate: string; trialDaysRemaining: number } {
-  if (trial_duration === 0) {
-    return { isInTrial: false, trialEndDate: "", trialDaysRemaining: 0 };
-  }
-  const trialEndTimestamp = last_charged + trial_duration;
-  const now = Math.floor(Date.now() / 1000);
-  const isInTrial = now < trialEndTimestamp;
-  const trialEndDate = new Date(trialEndTimestamp * 1000).toLocaleDateString();
-  const trialDaysRemaining = Math.max(
-    0,
-    Math.ceil((trialEndTimestamp - now) / (24 * 60 * 60))
-  );
-
-  return { isInTrial, trialEndDate, trialDaysRemaining };
-}
-
 /**
  * Compute the allowance health tier given the raw allowance and subscription
  * amount (both in stroops).
  */
-export function computeAllowanceHealth(
-  allowance: bigint | null,
-  amount: bigint
-): AllowanceHealth {
+export function computeAllowanceHealth(allowance: bigint | null, amount: bigint): AllowanceHealth {
   if (allowance === null) return "unknown";
   if (allowance === 0n) return "none";
   if (allowance < amount) return "low";
@@ -126,15 +117,15 @@ function AllowanceHealthBadge({ health, loading, onClick }: AllowanceHealthBadge
     health === "none"
       ? "No allowance — charges will fail"
       : health === "low"
-      ? "Allowance too low"
-      : "Allowance unknown";
+        ? "Allowance too low"
+        : "Allowance unknown";
 
   const className =
     health === "none"
       ? "allowance-health-badge allowance-health-badge--none"
       : health === "low"
-      ? "allowance-health-badge allowance-health-badge--low"
-      : "allowance-health-badge allowance-health-badge--unknown";
+        ? "allowance-health-badge allowance-health-badge--low"
+        : "allowance-health-badge allowance-health-badge--unknown";
 
   return (
     <button
@@ -146,8 +137,8 @@ function AllowanceHealthBadge({ health, loading, onClick }: AllowanceHealthBadge
       {health === "none"
         ? "⚠ No allowance — charges will fail"
         : health === "low"
-        ? "⚠ Allowance too low"
-        : "? Allowance unknown"}
+          ? "⚠ Allowance too low"
+          : "? Allowance unknown"}
     </button>
   );
 }
@@ -215,11 +206,15 @@ export default function SubscriptionCard({
   onSign,
   onRefresh,
   onCancelled,
+  showSimulateCharge = false,
+  onHealthChange,
+  onSimulateResult,
 }: SubscriptionCardProps) {
-  const { merchant, amount, interval, last_charged, active, paused, trial_duration } = subscription;
+  const { merchant, amount, interval, last_charged, active, paused } = subscription;
   const { mutate } = useSubscriptionSync(userKey);
   const { isMobile } = useResponsive();
   const { displayCurrentAmount } = useAmountDisplay();
+  const { addToast } = useToast();
   const nextChargeTimestamp = last_charged + interval;
   const formattedAmount = displayCurrentAmount(amount);
 
@@ -230,12 +225,23 @@ export default function SubscriptionCard({
 
   // ── Pause / resume via hook ────────────────────────────────────────────────
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
-  const { pause, resume, pauseTx, resumeTx } = usePauseResume(userKey, onSign, onRefresh);
+  const [pauseMode, setPauseMode] = useState<"indefinite" | "until">("indefinite");
+  const [pauseUntilInput, setPauseUntilInput] = useState("");
+  const [pauseValidationError, setPauseValidationError] = useState<string | null>(null);
+  const [scheduledResumeAt, setScheduledResumeAt] = useState<number | null>(null);
+  const { pause, pauseUntil, resume, pauseTx, pauseUntilTx, resumeTx } = usePauseResume(
+    userKey,
+    onSign,
+    onRefresh
+  );
 
   // ── Allowance health state ─────────────────────────────────────────────────
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [allowanceLoading, setAllowanceLoading] = useState(true);
   const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+
+  // ── Transfer subscription state ────────────────────────────────────────────
+  const [showTransferModal, setShowTransferModal] = useState(false);
 
   const amountBigInt = BigInt(amount);
   const health = computeAllowanceHealth(allowance, amountBigInt);
@@ -299,15 +305,40 @@ export default function SubscriptionCard({
       setShowCancelConfirm(false);
       onCancelled?.();
     } catch (e: unknown) {
-      setCancelStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      setCancelStatus(msg);
+      addToast(msg, "error");
     } finally {
       setCancelLoading(false);
     }
   };
 
   const handlePause = async () => {
+    if (pauseMode === "until") {
+      if (!pauseUntilInput) {
+        setPauseValidationError("Choose a resume date and time.");
+        return;
+      }
+      const expirySeconds = Math.floor(new Date(pauseUntilInput).getTime() / 1000);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (!Number.isFinite(expirySeconds) || expirySeconds <= nowSeconds) {
+        setPauseValidationError("Resume time must be in the future.");
+        return;
+      }
+      setPauseValidationError(null);
+      try {
+        await pauseUntil(BigInt(expirySeconds));
+        setScheduledResumeAt(expirySeconds);
+        setShowPauseConfirm(false);
+      } catch {
+        // pauseUntilTx.error holds the failure reason
+      }
+      return;
+    }
+
     try {
       await pause();
+      setScheduledResumeAt(null);
       setShowPauseConfirm(false);
     } catch {
       // pauseTx.error holds the failure reason
@@ -323,12 +354,18 @@ export default function SubscriptionCard({
   };
 
   let derivedPauseStatus = "";
-  if (pauseTx.state === "pending") {
+  if (pauseTx.state === "pending" || pauseUntilTx.state === "pending") {
     derivedPauseStatus = "Pausing…";
   } else if (pauseTx.state === "success") {
     derivedPauseStatus = "Paused successfully.";
+  } else if (pauseUntilTx.state === "success") {
+    derivedPauseStatus = scheduledResumeAt
+      ? `Paused until ${new Date(scheduledResumeAt * 1000).toLocaleString()}.`
+      : "Paused successfully.";
   } else if (pauseTx.state === "failed") {
     derivedPauseStatus = `Error: ${pauseTx.error || "Failed to pause"}`;
+  } else if (pauseUntilTx.state === "failed") {
+    derivedPauseStatus = `Error: ${pauseUntilTx.error || "Failed to pause"}`;
   } else if (resumeTx.state === "pending") {
     derivedPauseStatus = "Resuming…";
   } else if (resumeTx.state === "success") {
@@ -339,6 +376,16 @@ export default function SubscriptionCard({
 
   const isInTrial = trialEndTimestamp !== null && trialEndTimestamp > Math.floor(Date.now() / 1000);
 
+  const [subHealth, setSubHealth] = useState<SubscriptionHealth | null>(null);
+
+  const handleHealthChange = (next: SubscriptionHealth | null) => {
+    setSubHealth(next);
+    onHealthChange?.(next);
+  };
+
+  const healthUnhealthy = subHealth != null && subscriptionHasWarnings(subHealth);
+  const healthBlocksActions = subHealth != null && !isSubscriptionHealthy(subHealth);
+
   return (
     <div className={`card${isMobile ? " card--mobile" : ""}`}>
       <div className="subscription-card__header">
@@ -346,8 +393,10 @@ export default function SubscriptionCard({
           <h2 className="subscription-card__title">Your Subscription</h2>
           {subscription.label && <p className="subscription-card__label">{subscription.label}</p>}
         </div>
-        <span className={`badge ${active ? "badge-active" : "badge-inactive"}`}>
-          {active ? (isInTrial ? "Trial Active" : "Active") : "Cancelled"}
+        <span
+          className={`badge ${active && !paused ? "badge-active" : paused ? "badge-warning" : "badge-inactive"}`}
+        >
+          {active ? (paused ? "Paused" : isInTrial ? "Trial Active" : "Active") : "Cancelled"}
         </span>
       </div>
 
@@ -384,11 +433,17 @@ export default function SubscriptionCard({
         <StackedRow label="Interval" value={formatInterval(interval)} isMobile={isMobile} />
         <div className={`subscription-row${isMobile ? " subscription-row--stacked" : ""}`}>
           <span className="subscription-row__label">
-            {isInTrial ? "First charge" : "Next charge"}
+            {paused ? "Status" : isInTrial ? "First charge" : "Next charge"}
           </span>
           <span className="subscription-row__value">
-            {active && !paused ? (
-              <NextChargeCountdown nextChargeTimestamp={nextChargeTimestamp} />
+            {active ? (
+              paused ? (
+                <span className="badge badge-warning" aria-label="Subscription is paused">
+                  Paused
+                </span>
+              ) : (
+                <NextChargeCountdown nextChargeTimestamp={nextChargeTimestamp} />
+              )
             ) : (
               "—"
             )}
@@ -396,12 +451,27 @@ export default function SubscriptionCard({
         </div>
       </div>
 
+      {active && healthUnhealthy && (
+        <p
+          className="text-sm"
+          data-testid="health-action-warning"
+          role="status"
+          style={{ color: "var(--color-danger-text)", marginBottom: "var(--space-3)" }}
+        >
+          {healthBlocksActions
+            ? "Subscription is unhealthy. Pause and cancel remain available; pay and charge may fail."
+            : "Subscription needs attention before the next charge."}
+        </p>
+      )}
+
       <div className="subscription-card__actions">
         {active && !paused && (
           <>
             <button
               onClick={() => setShowPauseConfirm(true)}
               className="btn-secondary pause-btn"
+              aria-label="Pause subscription"
+              title={healthUnhealthy ? "Subscription needs attention" : undefined}
             >
               Pause
             </button>
@@ -409,13 +479,27 @@ export default function SubscriptionCard({
               onClick={() => setShowCancelConfirm(true)}
               className="btn-danger cancel-btn"
               aria-label="Cancel subscription"
+              title={healthUnhealthy ? "Subscription needs attention" : undefined}
             >
               Cancel
+            </button>
+            <button
+              onClick={() => setShowTransferModal(true)}
+              className="btn-secondary transfer-btn"
+              aria-label="Transfer subscription ownership"
+              data-testid="transfer-subscription-button"
+            >
+              Transfer
             </button>
           </>
         )}
         {active && paused && (
           <>
+            {scheduledResumeAt && (
+              <p className="text-sm text-muted" data-testid="scheduled-resume">
+                Scheduled to resume {new Date(scheduledResumeAt * 1000).toLocaleString()}
+              </p>
+            )}
             <button
               onClick={handleResume}
               disabled={resumeTx.state === "pending"}
@@ -430,6 +514,14 @@ export default function SubscriptionCard({
             >
               Cancel
             </button>
+            <button
+              onClick={() => setShowTransferModal(true)}
+              className="btn-secondary transfer-btn"
+              aria-label="Transfer subscription ownership"
+              data-testid="transfer-subscription-button"
+            >
+              Transfer
+            </button>
           </>
         )}
       </div>
@@ -439,17 +531,71 @@ export default function SubscriptionCard({
         <div className="modal-overlay" onClick={() => setShowPauseConfirm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Pause subscription?</h3>
-            <p>You won&apos;t be charged while paused. You can resume anytime.</p>
+            <p>You won&apos;t be charged while paused.</p>
+
+            <div className="form-group" role="radiogroup" aria-label="Pause duration">
+              <label className="form-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="radio"
+                  name="pause-mode"
+                  checked={pauseMode === "indefinite"}
+                  onChange={() => {
+                    setPauseMode("indefinite");
+                    setPauseValidationError(null);
+                  }}
+                />
+                Pause indefinitely — resume manually
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                <input
+                  type="radio"
+                  name="pause-mode"
+                  checked={pauseMode === "until"}
+                  onChange={() => setPauseMode("until")}
+                />
+                Pause until a specific date &amp; time
+              </label>
+
+              {pauseMode === "until" && (
+                <div style={{ marginTop: 8 }}>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    data-testid="pause-until-input"
+                    aria-label="Resume date and time"
+                    value={pauseUntilInput}
+                    min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                    onChange={(e) => {
+                      setPauseUntilInput(e.target.value);
+                      setPauseValidationError(null);
+                    }}
+                  />
+                  {pauseValidationError && (
+                    <span
+                      className="error-message text-error"
+                      role="alert"
+                      data-testid="pause-until-error"
+                      style={{ display: "block", marginTop: 4 }}
+                    >
+                      {pauseValidationError}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="modal-actions">
               <button onClick={() => setShowPauseConfirm(false)} className="btn-secondary">
                 Cancel
               </button>
               <button
                 onClick={handlePause}
-                disabled={pauseTx.state === "pending"}
+                disabled={pauseTx.state === "pending" || pauseUntilTx.state === "pending"}
                 className="btn-primary"
               >
-                {pauseTx.state === "pending" ? "Pausing…" : "Pause"}
+                {pauseTx.state === "pending" || pauseUntilTx.state === "pending"
+                  ? "Pausing…"
+                  : "Pause"}
               </button>
             </div>
           </div>
@@ -494,8 +640,29 @@ export default function SubscriptionCard({
         />
       )}
 
-      {/* Subscription Health Widget */}
-      <SubscriptionHealthWidget userKey={userKey} />
+      {/* Transfer subscription modal — guided ownership transfer */}
+      {showTransferModal && (
+        <TransferSubscriptionModal
+          userKey={userKey}
+          onSign={onSign}
+          onClose={() => setShowTransferModal(false)}
+          onSuccess={() => {
+            setShowTransferModal(false);
+            addToast("Subscription transferred successfully.", "success");
+            onRefresh();
+          }}
+        />
+      )}
+
+      {/* Subscription Health Widget — only for active subscriptions */}
+      {active && (
+        <SubscriptionHealthWidget
+          userKey={userKey}
+          showSimulateCharge={showSimulateCharge}
+          onHealthChange={handleHealthChange}
+          onSimulateResult={onSimulateResult}
+        />
+      )}
 
       {(derivedPauseStatus || cancelStatus) && (
         <p
@@ -512,7 +679,19 @@ export default function SubscriptionCard({
       )}
 
       {(derivedPauseStatus.startsWith("Error") || cancelStatus.startsWith("Error")) && (
-        <ErrorRecovery error={derivedPauseStatus.startsWith("Error") ? pauseTx.error || resumeTx.error : cancelStatus} />
+        <ErrorRecovery
+          error={
+            derivedPauseStatus.startsWith("Error")
+              ? pauseTx.error || pauseUntilTx.error || resumeTx.error
+              : cancelStatus
+          }
+          health={subHealth}
+          onIncreaseAllowance={
+            subHealth && !subHealth.has_sufficient_allowance
+              ? () => setShowAllowanceModal(true)
+              : undefined
+          }
+        />
       )}
     </div>
   );
