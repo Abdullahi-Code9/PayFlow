@@ -265,3 +265,5 @@ Before opening a PR, confirm:
 For architectural background (hook composition, `stellar.ts` responsibilities), see:
 
 - `docs/FRONTEND.md`
+- `docs/FRONTEND-COMPONENTS.md`
+- `docs/limits.md` — admin batch UI vs contract caps (do not change caps in a docs-only change)
