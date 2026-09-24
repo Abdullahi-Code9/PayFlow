@@ -48,6 +48,8 @@ Each directory has a dedicated responsibility.
 - **services** provide shared utilities.
 - **stellar.ts** acts as the blockchain gateway.
 
+Canonical vs orphan modules and validation-rule owners: [`frontend/components.md`](frontend/components.md).
+
 ---
 
 # stellar.ts Architecture

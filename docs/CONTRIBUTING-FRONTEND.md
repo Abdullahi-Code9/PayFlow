@@ -265,3 +265,4 @@ Before opening a PR, confirm:
 For architectural background (hook composition, `stellar.ts` responsibilities), see:
 
 - `docs/FRONTEND.md`
+- `docs/frontend/components.md` — canonical vs orphan components; validation-rule owners
