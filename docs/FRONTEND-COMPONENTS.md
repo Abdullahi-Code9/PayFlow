@@ -1,6 +1,6 @@
 # Frontend Component Reference
 
-Component-by-component reference for PayFlow’s React UI. For architecture and contribution workflow, see [FRONTEND.md](./FRONTEND.md) and [CONTRIBUTING-FRONTEND.md](./CONTRIBUTING-FRONTEND.md).
+Component-by-component reference for PayFlow’s React UI (props and signatures). For **canonical vs orphan** status, validation-rule owners, and `stellarBatchCharge.ts`, see [`frontend/components.md`](./frontend/components.md). Architecture and contribution workflow: [FRONTEND.md](./FRONTEND.md) and [CONTRIBUTING-FRONTEND.md](./CONTRIBUTING-FRONTEND.md).
 
 Props and signatures below are taken from TypeScript sources under `frontend/src/`. Amounts are generally in **stroops** unless noted.
 
