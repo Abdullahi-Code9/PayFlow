@@ -143,20 +143,21 @@ soroban contract invoke --id <CONTRACT_ID> --network mainnet -- is_contract_paus
 
 Fields and interpretation: [`API.md` — `HealthReport`](API.md#healthreport).
 
-### Off-chain: `scripts/health-check.ts` (shallow)
+### Off-chain: `scripts/health-check.ts`
 
-This script simulates `get_schema_version` and `get_active_count`. It does **not** call `contract_health_check` and has **no** `--deep` mode.
+Shallow mode (default) simulates `get_schema_version` and `get_active_count`. Deep mode (`--deep` or `HEALTH_DEEP=true`) also simulates `contract_health_check` and `get_batch_charge_estimate`.
 
 ```bash
-cd scripts
-CONTRACT_ID=<CONTRACT_ID> npx tsx health-check.ts
-# exit 0 = both calls returned valid responses; exit 1 = unhealthy
+CONTRACT_ID=<CONTRACT_ID> npx tsx scripts/health-check.ts
+CONTRACT_ID=<CONTRACT_ID> npx tsx scripts/health-check.ts --deep
+# From scripts/: CONTRACT_ID=<CONTRACT_ID> npx tsx health-check.ts
+# exit 0 = healthy; exit 1 = unhealthy
 ```
 
 Env: `CONTRACT_ID` (required; `VITE_CONTRACT_ID` accepted), `RPC_URL` / `VITE_RPC_URL`, `NETWORK=mainnet` to select `Networks.PUBLIC`.
 
 - [ ] `contract_health_check` reports `is_healthy: true`, token + admin configured, not paused
-- [ ] `scripts/health-check.ts` exits 0 against the Mainnet contract ID and Mainnet RPC
+- [ ] `scripts/health-check.ts` exits 0 against the Mainnet contract ID and Mainnet RPC (use `--deep` for the on-chain health report)
 - [ ] Schema version matches the release notes / [`DEPLOYMENT.md` migration history](DEPLOYMENT.md#migration-history)
 
 ---
@@ -246,7 +247,7 @@ Get-FileHash contract\target\wasm32-unknown-unknown\release\flow_pay.wasm -Algor
 
 ## Phase 2 — Deploy
 
-> Prefer `scripts/deploy-pipeline.ts` when you intend a scripted deploy. There is **no** `scripts/deploy.sh` in this repository. The pipeline reads [`deployments/config.json`](../deployments/config.json); the checked-in file is **testnet**. Do not point it at Mainnet until the [audit gate](#audit-gate-mandatory--do-not-skip) is complete.
+> Prefer `scripts/deploy-pipeline.ts` when you intend a scripted deploy. The pipeline reads [`deployments/config.json`](../deployments/config.json); the checked-in file is **testnet**. Do not point it at Mainnet until the [audit gate](#audit-gate-mandatory--do-not-skip) is complete. Day-to-day steps: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ### Option A — Deploy pipeline
 
@@ -314,7 +315,7 @@ soroban contract invoke \
 
 ## Phase 3 — Post-deploy verification
 
-There is **no** `scripts/verify-contract.sh`. Verify with the health APIs and admin reads:
+Verify with the health APIs and admin reads (see [`DEPLOYMENT.md`](DEPLOYMENT.md#post-deployment-health-gates)):
 
 ```bash
 soroban contract invoke --id <CONTRACT_ID> --network mainnet -- contract_health_check
