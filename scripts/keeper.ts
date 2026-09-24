@@ -11,6 +11,7 @@
  *   CONTRACT_ID=... KEEPER_PUBLIC_KEY=... tsx keeper.ts
  *   CONTRACT_ID=... KEEPER_PUBLIC_KEY=... KEEPER_SECRET=... tsx keeper.ts
  *   CONTRACT_ID=... DRY_RUN=true KEEPER_PUBLIC_KEY=... tsx keeper.ts --once
+ *   CONTRACT_ID=... KEEPER_PUBLIC_KEY=... tsx keeper.ts --dry-run --max-batches=2
  *
  * Environment Variables:
  *   CONTRACT_ID           Required. Deployed FlowPay contract ID.
@@ -34,8 +35,10 @@
  *                         optimized batches (default: false, i.e. optimized).
  *
  * Flags:
- *   --once      Run a single cycle and exit.
- *   --help, -h  Show this help message.
+ *   --once             Run a single cycle and exit.
+ *   --dry-run          Same as DRY_RUN=true.
+ *   --max-batches=N    Process at most N batches, then exit (implies --once).
+ *   --help, -h         Show this help message.
  *
  * Caveats:
  *   - Dry-run simulation results may differ from actual charges due to
@@ -48,10 +51,9 @@
 
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { assembleTransaction } from "@stellar/stellar-sdk/rpc";
 import { MultiEndpointServer } from "./rpc-client.js";
-import { buildOptimizedBatches } from "./batch-optimizer";
-import { Server, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 import { buildOptimizedBatches } from "./batch-optimizer.js";
 import {
   startMetricsServer,
@@ -59,7 +61,7 @@ import {
   recordChargeResults,
   incrementCycles,
   setActiveSubscribers,
-} from "./metrics-server";
+} from "./metrics-server.js";
 import {
   Address,
   Contract,
@@ -70,7 +72,13 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
-import { logger as rootLogger } from "./logger";
+import { logger as rootLogger } from "./logger.js";
+import { log } from "./utils/log.js";
+import {
+  addPageTally,
+  tallyChargeResults,
+  type CandidateRecord,
+} from "./lib/dry-run-stats.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -78,19 +86,11 @@ const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE = (process.env.NETWORK_PASSPHRASE ??
   Networks.TESTNET) as string;
-const DRY_RUN = process.env.DRY_RUN === "true";
+const DRY_RUN =
+  process.env.DRY_RUN === "true" || process.argv.slice(2).includes("--dry-run");
 const KEEPER_PUBLIC_KEY = process.env.KEEPER_PUBLIC_KEY || "";
 const KEEPER_SECRET = process.env.KEEPER_SECRET || "";
-const BATCH_SIZE = Math.min(
-  Math.max(Number(process.env.BATCH_SIZE) || 50, 1),
-  50,
-);
-const INTERVAL_SECONDS = Math.max(
-  Number(process.env.INTERVAL_SECONDS) || 3600,
-  1,
-);
-const REPORT_DIR =
-  process.env.REPORT_DIR ?? path.join(__dirname, "data", "benchmarks");
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * BATCH_SIZE resolution — kept in sync with the on-chain `get_max_batch_size`
@@ -112,8 +112,21 @@ let BATCH_SIZE =
     : DEFAULT_BATCH_SIZE;
 
 const INTERVAL_SECONDS = Math.max(Number(process.env.INTERVAL_SECONDS) || 3600, 1);
-const REPORT_DIR = process.env.REPORT_DIR ?? path.join(__dirname, "data", "benchmarks");
+const REPORT_DIR = process.env.REPORT_DIR ?? path.join(SCRIPT_DIR, "data", "benchmarks");
 const USE_LEGACY_PAGING = process.env.KEEPER_USE_LEGACY_PAGING === "true";
+
+/** `--max-batches=N`: process at most N batches in total, then exit. */
+const MAX_BATCHES = (() => {
+  const arg = process.argv.slice(2).find((a) => a.startsWith("--max-batches="));
+  if (!arg) return undefined;
+  const n = Number(arg.slice("--max-batches=".length));
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+})();
+let batchesProcessed = 0;
+
+function batchBudgetExhausted(): boolean {
+  return MAX_BATCHES !== undefined && batchesProcessed >= MAX_BATCHES;
+}
 
 const server = new MultiEndpointServer();
 
@@ -163,8 +176,10 @@ Usage:
   CONTRACT_ID=... DRY_RUN=true KEEPER_PUBLIC_KEY=... tsx keeper.ts [options]
 
 Options:
-  --once      Run a single charge cycle and exit.
-  --help, -h  Show this help message.
+  --once             Run a single charge cycle and exit.
+  --dry-run          Same as DRY_RUN=true.
+  --max-batches=N    Process at most N batches, then exit (implies --once).
+  --help, -h         Show this help message.
 
 Environment Variables:
   CONTRACT_ID           Required. Deployed FlowPay contract ID.
@@ -281,14 +296,6 @@ function writeDlqEntry(entry: DlqEntry): void {
 
 // ── Report types ─────────────────────────────────────────────────────────────
 
-/** One subscriber's outcome within a cycle, included in both dry-run and live reports. */
-interface CandidateRecord {
-  user: string;
-  result: string;
-  /** Subscription amount in stroops. "0" when the result is not Charged. */
-  amountStroops: string;
-}
-
 /**
  * Small pointer file overwritten after every successful live cycle.
  * Path: REPORT_DIR/keeper-latest-live.json
@@ -358,10 +365,6 @@ async function getSubscriberCount(): Promise<number> {
   return Number(retval.u64());
 }
 
-async function getSubscriberPage(
-  offset: number,
-  limit: number,
-): Promise<string[]> {
 /**
  * Read the contract's current `get_max_batch_size()` — the on-chain cap for
  * `batch_charge()` calls. Defaults to 50 on-chain but is admin-configurable
@@ -684,35 +687,11 @@ async function processPageDryRun(
     const { results, amounts } = await simulateBatchCharge(users);
 
     // results is index-aligned with users (same order, one entry per input).
-    let amountIdx = 0;
-    for (let i = 0; i < results.length; i++) {
-      const variant = results[i];
-      const user = i < users.length ? users[i] : "unknown";
-
-      if (variant === "Charged") {
-        const amt = amountIdx < amounts.length ? amounts[amountIdx] : 0n;
-        result.wouldCharge++;
-        result.totalVolume += amt;
-        result.candidates.push({ user, result: variant, amountStroops: amt.toString() });
-        amountIdx++;
-      } else {
-        result.skipCounts[variant] = (result.skipCounts[variant] || 0) + 1;
-        result.candidates.push({ user, result: variant, amountStroops: "0" });
-      }
-    if (variant === "Charged") {
-      const amt = amountIdx < amounts.length ? amounts[amountIdx] : 0n;
-      result.wouldCharge++;
-      result.totalVolume += amt;
-      result.candidates.push({
-        user,
-        result: variant,
-        amountStroops: amt.toString(),
-      });
-      amountIdx++;
-    } else {
-      result.skipCounts[variant] = (result.skipCounts[variant] || 0) + 1;
-      result.candidates.push({ user, result: variant, amountStroops: "0" });
-    }
+    const tally = tallyChargeResults(users, results, amounts);
+    result.wouldCharge = tally.charged;
+    result.totalVolume = tally.totalVolume;
+    result.skipCounts = tally.skipCounts;
+    result.candidates = tally.candidates;
 
     const durationMs = Date.now() - startMs;
     recordBatchCharge({
@@ -759,26 +738,11 @@ async function processPageLive(
     result.txHash = txHash;
 
     // results is index-aligned with users.
-    let amountIdx = 0;
-    for (let i = 0; i < results.length; i++) {
-      const variant = results[i];
-      const user = i < users.length ? users[i] : "unknown";
-
-      if (variant === "Charged") {
-        const amt = amountIdx < amounts.length ? amounts[amountIdx] : 0n;
-        result.charged++;
-        result.totalVolume += amt;
-        result.candidates.push({
-          user,
-          result: variant,
-          amountStroops: amt.toString(),
-        });
-        amountIdx++;
-      } else {
-        result.skipCounts[variant] = (result.skipCounts[variant] || 0) + 1;
-        result.candidates.push({ user, result: variant, amountStroops: "0" });
-      }
-    }
+    const tally = tallyChargeResults(users, results, amounts);
+    result.charged = tally.charged;
+    result.totalVolume = tally.totalVolume;
+    result.skipCounts = tally.skipCounts;
+    result.candidates = tally.candidates;
 
     const durationMs = Date.now() - startMs;
     recordBatchCharge({
@@ -971,14 +935,14 @@ async function runCycleOptimized(report: CycleReport, isDryRun: boolean): Promis
   );
 
   for (const batch of optimized.batches) {
+    if (batchBudgetExhausted()) break;
+    batchesProcessed++;
     const users = batch.users;
     const offset = batch.batch;
 
     if (isDryRun) {
       const pageResult = await processPageDryRun(users, offset);
-      report.totalCharged += pageResult.wouldCharge;
-      report.totalVolume += pageResult.totalVolume;
-      report.candidates.push(...pageResult.candidates);
+      addPageTally(report, { ...pageResult, charged: pageResult.wouldCharge });
       report.errors.push(...pageResult.errors);
 
       logger.info("Batch simulated", {
@@ -1009,9 +973,7 @@ async function runCycleOptimized(report: CycleReport, isDryRun: boolean): Promis
       if (skipDetails) log(true, `  ${skipDetails}`);
     } else {
       const pageResult = await processPageLive(users, offset);
-      report.totalCharged += pageResult.charged;
-      report.totalVolume += pageResult.totalVolume;
-      report.candidates.push(...pageResult.candidates);
+      addPageTally(report, pageResult);
 
       // Track grace metrics for optimized path
       for (const c of pageResult.candidates) {
@@ -1022,9 +984,6 @@ async function runCycleOptimized(report: CycleReport, isDryRun: boolean): Promis
         }
       }
 
-      for (const [k, v] of Object.entries(pageResult.skipCounts)) {
-        report.totalSkips[k] = (report.totalSkips[k] || 0) + v;
-      }
       report.errors.push(...pageResult.errors);
       if (pageResult.txHash) report.txHashes.push(pageResult.txHash);
 
@@ -1049,26 +1008,6 @@ async function runCycleOptimized(report: CycleReport, isDryRun: boolean): Promis
   }
 }
 
-  if (isDryRun) {
-    logger.info("Cycle complete", {
-      mode: "dry-run",
-      checked: report.totalChecked,
-      would_charge: report.totalCharged,
-      total_volume_xlm: stroopsToXlm(report.totalVolume),
-    });
-  } else {
-    logger.info("Cycle complete", {
-      mode: "live",
-      charged: report.totalCharged,
-      total_volume_xlm: stroopsToXlm(report.totalVolume),
-      skips: report.totalSkips,
-    });
-  }
-
-  if (report.errors.length > 0) {
-    for (const err of report.errors) {
-      logger.error("Cycle error", { mode: isDryRun ? "dry-run" : "live", error: err });
-    }
 /**
  * Run a charge cycle using legacy sequential offset-based paging.
  * Pages through the subscriber index in insertion order (no urgency sorting).
@@ -1097,7 +1036,8 @@ async function runCycleLegacy(report: CycleReport, isDryRun: boolean): Promise<v
   log(isDryRun, `Legacy paging: ${totalSubscribers} subscriber(s), batch_size=${BATCH_SIZE}`);
 
   let offset = 0;
-  while (offset < totalSubscribers) {
+  while (offset < totalSubscribers && !batchBudgetExhausted()) {
+    batchesProcessed++;
     const users = await getSubscriberPage(offset, BATCH_SIZE);
     if (users.length === 0) break;
 
@@ -1105,9 +1045,7 @@ async function runCycleLegacy(report: CycleReport, isDryRun: boolean): Promise<v
 
     if (isDryRun) {
       const pageResult = await processPageDryRun(users, batchNum);
-      report.totalCharged += pageResult.wouldCharge;
-      report.totalVolume += pageResult.totalVolume;
-      report.candidates.push(...pageResult.candidates);
+      addPageTally(report, { ...pageResult, charged: pageResult.wouldCharge });
       report.errors.push(...pageResult.errors);
 
       // Track grace metrics for legacy path (urgent bucket = none in legacy)
@@ -1130,9 +1068,7 @@ async function runCycleLegacy(report: CycleReport, isDryRun: boolean): Promise<v
       if (skipDetails) log(true, `  ${skipDetails}`);
     } else {
       const pageResult = await processPageLive(users, batchNum);
-      report.totalCharged += pageResult.charged;
-      report.totalVolume += pageResult.totalVolume;
-      report.candidates.push(...pageResult.candidates);
+      addPageTally(report, pageResult);
 
       // Track grace metrics for legacy path
       for (const c of pageResult.candidates) {
@@ -1143,9 +1079,6 @@ async function runCycleLegacy(report: CycleReport, isDryRun: boolean): Promise<v
         }
       }
 
-      for (const [k, v] of Object.entries(pageResult.skipCounts)) {
-        report.totalSkips[k] = (report.totalSkips[k] || 0) + v;
-      }
       report.errors.push(...pageResult.errors);
       if (pageResult.txHash) report.txHashes.push(pageResult.txHash);
 
@@ -1262,7 +1195,7 @@ async function main(): Promise<void> {
     if (arg === "--help" || arg === "-h") showHelp();
   }
 
-  const once = argv.includes("--once");
+  const once = argv.includes("--once") || MAX_BATCHES !== undefined;
 
   validateEnv();
 
