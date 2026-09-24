@@ -23,6 +23,7 @@
         }
       ]
     ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
@@ -70,7 +71,7 @@
                   }
                 },
                 {
-                  "u32": 200
+                  "u32": 200000
                 }
               ]
             }
@@ -79,6 +80,7 @@
         }
       ]
     ],
+    [],
     [],
     [
       [
@@ -254,6 +256,18 @@
                         "val": {
                           "address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "WhitelistEnabled"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
                       }
                     ]
                   }
@@ -262,7 +276,7 @@
             },
             "ext": "v0"
           },
-          100000
+          6307200
         ]
       ],
       [
@@ -418,7 +432,7 @@
                         "symbol": "live_until_ledger"
                       },
                       "val": {
-                        "u32": 200
+                        "u32": 200000
                       }
                     }
                   ]
@@ -427,7 +441,7 @@
             },
             "ext": "v0"
           },
-          201
+          200001
         ]
       ],
       [
@@ -633,7 +647,7 @@
             },
             "ext": "v0"
           },
-          100000
+          6307200
         ]
       ]
     ]
@@ -881,7 +895,7 @@
                   }
                 },
                 {
-                  "u32": 200
+                  "u32": 200000
                 }
               ]
             }
@@ -920,7 +934,7 @@
                   }
                 },
                 {
-                  "u32": 200
+                  "u32": 200000
                 }
               ]
             }
@@ -1043,7 +1057,7 @@
               },
               {
                 "error": {
-                  "contract": 20
+                  "contract": 21
                 }
               }
             ],
@@ -1053,7 +1067,7 @@
                   "string": "failing with contract error"
                 },
                 {
-                  "u32": 20
+                  "u32": 21
                 }
               ]
             }
@@ -1075,7 +1089,7 @@
               },
               {
                 "error": {
-                  "contract": 20
+                  "contract": 21
                 }
               }
             ],
@@ -1100,7 +1114,7 @@
               },
               {
                 "error": {
-                  "contract": 20
+                  "contract": 21
                 }
               }
             ],
@@ -1125,7 +1139,7 @@
               },
               {
                 "error": {
-                  "contract": 20
+                  "contract": 21
                 }
               }
             ],
@@ -1164,7 +1178,7 @@
               },
               {
                 "error": {
-                  "contract": 20
+                  "contract": 21
                 }
               }
             ],
