@@ -646,6 +646,8 @@ These components exist in `frontend/src/components/` but are not currently wired
 | `admin/BatchWhitelistPanel`     | Batch whitelist add/remove                                  |
 | `admin/AddressListInput`        | Multiline address textarea                                  |
 
+Batch size caps (pause 25, whitelist 50, charge/cancel contract defaults) are tabulated in [`limits.md`](limits.md). Do not change those numbers in the UI without updating the table and the contract constants together.
+
 ### Pages
 
 | File                       | Purpose                                | Mount path                                              |
