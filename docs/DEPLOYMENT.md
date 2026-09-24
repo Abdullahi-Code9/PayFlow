@@ -112,24 +112,92 @@ soroban contract invoke --id <CONTRACT_ID> --network <NETWORK> -- get_protocol_s
 
 ## State Migration
 
-When upgrading to a new WASM that introduces storage layout changes, call `migrate()` once after deployment:
+`migrate(users)` is **admin-only** (`admin::require_admin`). It takes a page of subscriber addresses. Current target is `CURRENT_VERSION` **3** in [`contract/src/migration.rs`](../contract/src/migration.rs). Already-migrated slots are no-ops; repeating `migrate` at version 3 does not bump the version again.
+
+Paged workflow (also documented on `require_current_version` / `migrate` in that file):
+
+1. Upgrade WASM. `schema_version` stays at the pre-upgrade value until migration finishes.
+2. Page subscribers with `get_subscriber_page` (capped at 50 addresses per call).
+3. Invoke `migrate` for each page.
+4. Confirm `get_schema_version() == 3` before treating the instance as caught up.
 
 ```bash
 soroban contract invoke \
   --id <CONTRACT_ID> \
-  --source deployer \
-  --network <NETWORK> \
-  -- migrate
+  --source admin \
+  --network testnet \
+  -- get_subscriber_page --offset 0 --limit 50
+
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source admin \
+  --network testnet \
+  -- migrate --users '["<USER_ADDRESS>"]'
+
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- get_schema_version
 ```
 
-Subsequent calls are safe no-ops. See [Migration History](#migration-history) below.
+Optional helper: [`scripts/migrate-contract.ts`](../scripts/migrate-contract.ts) (`npx tsx scripts/migrate-contract.ts [--dry-run]`), using `VITE_CONTRACT_ID` / `VITE_RPC_URL` / `VITE_NETWORK_PASSPHRASE`. Prefer the CLI invokes above unless you have validated that script in your environment.
+
+If subscription writes fail with **error 42**, follow [SchemaMigrationRequired (error 42)](#schemamigrationrequired-error-42) — do not treat it as a random subscribe bug.
 
 ### Migration History
 
-| Version | Changes                                                                     |
-| ------- | --------------------------------------------------------------------------- |
-| v1      | Initial schema                                                              |
-| v2      | Added `SchemaVersion`, `Referral`, `SubscriptionMeta`, `ChargeHistory` keys |
+| Version | Changes                                                                                  |
+| ------- | ---------------------------------------------------------------------------------------- |
+| v1      | Initial schema (`Subscription` without `paused`)                                         |
+| v2      | Adds `paused`; writes `SchemaVersion`                                                    |
+| v3      | Backfills `referrer` from `DataKey::Referral` (`CURRENT_VERSION`)                        |
+
+---
+
+## SchemaMigrationRequired (error 42)
+
+Canonical operator note for the schema-version **write-denial** safety rail. Error-code lookup: [`ERROR-CODES.md` — 42](ERROR-CODES.md#42--schemamigrationrequired).
+
+### Invariant
+
+After a WASM upgrade, on-chain code knows the current `Subscription` shape (`CURRENT_VERSION` = 3), but unmigrated slots may still hold v1/v2 blobs. The intended rail is: **refuse new subscription-blob writes until `get_schema_version() == CURRENT_VERSION`**, so operators paging through `migrate()` never mix freshly written current-version blobs with stale ones.
+
+This is the comment on `migration::require_current_version` in [`contract/src/migration.rs`](../contract/src/migration.rs):
+
+> Invariant guard: panics with `ContractError::SchemaMigrationRequired` when `schema_version < CURRENT_VERSION`. Call this at the top of any entrypoint that writes new subscription blobs (e.g. `subscribe_inner`) so that mixed-version storage can never be created after a WASM upgrade.
+
+`require_current_version` panics with **code 42** when `get_schema_version() < 3`. The helper is the source of the typed error. Intended write surfaces are **`subscribe` / `subscribe_with_metadata`** (they share `subscribe_inner`). `migrate` does **not** call this guard.
+
+### How to recognize it
+
+- User or integrator `subscribe` / `subscribe_with_metadata` panics with `SchemaMigrationRequired` / Soroban error **42** (GitHub issue discussions may call this “#42”).
+- `get_schema_version` returns `0`, `1`, or `2` (unset defaults to **0**).
+- `contract_health_check` / `get_protocol_stats` report a `schema_version` below 3.
+
+This is **intentional**, not a keeper or wallet defect.
+
+### Remedy (order)
+
+1. Confirm version: `get_schema_version` (and optional `contract_health_check`).
+2. Keep **admin** access — you still need it for `migrate`.
+3. Run the [paged `migrate(users)` procedure](#state-migration) until `get_schema_version() == 3`.
+4. Retry the subscription write.
+
+Do not redeploy a new contract ID solely because of 42. Do not skip paging on a large `SubscriberIndex`.
+
+### Admin paths while the rail is active
+
+`require_current_version` is not applied to administrative entrypoints. While schema is stale, operators can still:
+
+| Still available (not gated by 42) | Role |
+| --------------------------------- | ---- |
+| `migrate(users)`                  | The catch-up entrypoint (admin) |
+| `propose_upgrade` / `commit_upgrade` / `cancel_pending_upgrade` | WASM ceremony |
+| `pause_contract` / `unpause_contract` | Incident control |
+| Whitelist / freeze / fee propose-commit | Merchant and fee admin |
+| `get_schema_version`, `get_subscriber_page`, `contract_health_check`, `get_protocol_stats` | Reads |
+
+Keepers charging **existing** subscriptions are a separate path: they do not go through `require_current_version`. After a layout-changing upgrade, still migrate before relying on new fields (`paused`, `referrer`).
 
 ---
 
@@ -149,12 +217,12 @@ soroban contract invoke \
   --network <NETWORK> \
   -- upgrade <NEW_WASM_HASH>
 
-# 3. Run migration if storage layout changed
+# 3. Run paged migration if storage layout changed (see State Migration)
 soroban contract invoke \
   --id <CONTRACT_ID> \
-  --source deployer \
+  --source admin \
   --network <NETWORK> \
-  -- migrate
+  -- migrate --users '["<USER_ADDRESS>"]'
 ```
 
 An `upgraded` event is emitted on success.
@@ -178,9 +246,9 @@ FlowPay does not support automatic rollback. To revert to a previous WASM:
      --network <NETWORK> \
      -- upgrade <PREVIOUS_WASM_HASH>
    ```
-4. **Run migration** if the previous version had a lower schema version:
+4. **Run migration** if the restored WASM still requires schema catch-up (paged `migrate(users)` — [State Migration](#state-migration)):
    ```bash
-   soroban contract invoke --id <CONTRACT_ID> --source deployer --network <NETWORK> -- migrate
+   soroban contract invoke --id <CONTRACT_ID> --source admin --network <NETWORK> -- migrate --users '["<USER_ADDRESS>"]'
    ```
 5. **Verify** the rollback using `verify-contract.sh`.
 
