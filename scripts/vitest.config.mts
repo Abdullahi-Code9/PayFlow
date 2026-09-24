@@ -11,7 +11,7 @@ export default defineConfig({
     ],
     globals: true,
     environment: "node",
-    include: ["**/__tests__/**/*.test.ts"],
+    include: ["**/__tests__/**/*.test.ts", "**/db/**/*.test.ts"],
     exclude: [
       "**/__tests__/merchant-queries.test.ts",
       "**/__tests__/merchant-analytics.test.ts",
