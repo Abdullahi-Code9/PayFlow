@@ -33,7 +33,9 @@ import * as stellar from "../stellar";
 import MerchantDashboard from "../components/MerchantDashboard";
 
 describe("MerchantDashboard – responsive layout", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("applies dashboard--mobile class on mobile viewport (375px)", async () => {
     setViewport(375);
@@ -110,7 +112,9 @@ describe("MerchantDashboard – responsive layout", () => {
     await waitFor(() => screen.getByText(/Merchant Dashboard/));
     // At 768px (which matches max-width: 768px) -> isMobile via max-width:639px = false
     // so should use grid-cols-2
-    const grid = container.querySelector(".merchant-stats-grid");
-    expect(grid).toBeTruthy();
+    await waitFor(() => {
+      const grid = container.querySelector(".merchant-stats-grid");
+      expect(grid).toBeTruthy();
+    });
   });
 });

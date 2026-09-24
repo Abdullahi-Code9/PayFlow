@@ -3,16 +3,34 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 // ─── module mocks ────────────────────────────────────────────────────────────
-vi.mock("../stellar", () => ({
-  buildCancelTx: vi.fn(),
-  buildPayPerUseTx: vi.fn(),
-  getSubscription: vi.fn(() => Promise.resolve(null)),
-  getAllowance: vi.fn(() => Promise.resolve(0n)),
-  getDailyLimit: vi.fn(() => Promise.resolve(null)),
-  getDailySpent: vi.fn(() => Promise.resolve(0n)),
-  explorerTxUrl: vi.fn((hash: string) => `https://stellar.expert/tx/${hash}`),
-  server: { getTransaction: vi.fn(() => Promise.resolve({ status: "SUCCESS" })) },
-}));
+vi.mock("../stellar", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../stellar")>();
+  return {
+    ...actual,
+    RPC_URL: "https://soroban-testnet.stellar.org",
+    getAllowance: vi.fn(() => Promise.resolve(0n)),
+    getTrialEnd: vi.fn(() => Promise.resolve(null)),
+    getSubscription: vi.fn(() => Promise.resolve(null)),
+    getDailyLimit: vi.fn(() => Promise.resolve(null)),
+    getDailySpent: vi.fn(() => Promise.resolve(0n)),
+    getSubscriptionHealth: vi.fn(() =>
+      Promise.resolve({
+        active: true,
+        charge_due: false,
+        within_grace: false,
+        has_sufficient_allowance: true,
+        is_paused: false,
+        trial_active: false,
+        daily_limit_set: false,
+      })
+    ),
+    simulateCharge: vi.fn(() => Promise.resolve("WouldSucceed")),
+    buildCancelTx: vi.fn(),
+    buildPayPerUseTx: vi.fn(),
+    explorerTxUrl: vi.fn((hash: string) => `https://stellar.expert/tx/${hash}`),
+    server: { getTransaction: vi.fn(() => Promise.resolve({ status: "SUCCESS" })) },
+  };
+});
 vi.mock("../hooks/usePolling", () => ({ usePolling: () => {} }));
 vi.mock("../hooks/useRpcHealth", () => ({
   useRpcHealth: vi.fn(() => ({ status: "healthy", latencyMs: 50, error: null })),
@@ -39,6 +57,7 @@ function setViewport(width: number) {
 }
 
 import * as stellar from "../stellar";
+import { useRpcHealth } from "../hooks/useRpcHealth";
 import Dashboard from "../components/Dashboard";
 
 const ACTIVE_SUB = {
@@ -55,11 +74,28 @@ function setupMocks(sub: typeof ACTIVE_SUB | null = ACTIVE_SUB) {
   vi.mocked(stellar.getAllowance).mockResolvedValue(0n);
   vi.mocked(stellar.getDailyLimit).mockResolvedValue(null);
   vi.mocked(stellar.getDailySpent).mockResolvedValue(0n);
+  vi.mocked(stellar.getSubscriptionHealth).mockResolvedValue({
+    active: true,
+    charge_due: false,
+    within_grace: false,
+    has_sufficient_allowance: true,
+    is_paused: false,
+    trial_active: false,
+    daily_limit_set: false,
+  });
+  vi.mocked(stellar.simulateCharge).mockResolvedValue("WouldSucceed");
   vi.mocked(stellar.server.getTransaction).mockResolvedValue({ status: "SUCCESS" } as any);
+  vi.mocked(useRpcHealth).mockReturnValue({
+    status: "healthy",
+    latencyMs: 50,
+    error: null,
+  } as ReturnType<typeof useRpcHealth>);
 }
 
 describe("Dashboard – responsive layout", () => {
-  afterEach(() => vi.resetAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("applies dashboard--mobile class on mobile viewport (375px)", async () => {
     setViewport(375);
@@ -74,9 +110,7 @@ describe("Dashboard – responsive layout", () => {
       />
     );
 
-    await waitFor(() =>
-      expect(screen.getByText(/No active subscription found/)).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/No active subscription found/)).toBeTruthy());
 
     expect(container.querySelector(".dashboard--mobile")).toBeTruthy();
   });
@@ -94,9 +128,7 @@ describe("Dashboard – responsive layout", () => {
       />
     );
 
-    await waitFor(() =>
-      expect(screen.getByText(/No active subscription found/)).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/No active subscription found/)).toBeTruthy());
   });
 
   it("applies dashboard--mobile class at exactly 639px", async () => {
@@ -112,9 +144,7 @@ describe("Dashboard – responsive layout", () => {
       />
     );
 
-    await waitFor(() =>
-      expect(screen.getByText(/No active subscription found/)).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/No active subscription found/)).toBeTruthy());
 
     await waitFor(() => {
       expect(container.querySelector(".dashboard--mobile")).toBeTruthy();
@@ -134,9 +164,7 @@ describe("Dashboard – responsive layout", () => {
       />
     );
 
-    await waitFor(() =>
-      expect(screen.getByText(/No active subscription found/)).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/No active subscription found/)).toBeTruthy());
 
     expect(container.querySelector(".dashboard--mobile")).toBeNull();
   });

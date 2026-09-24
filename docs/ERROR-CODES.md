@@ -43,10 +43,21 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 | 27   | `InvalidPauseExpiry`        | Validation   | Pause expiry not in future         |
 | 28   | `GlobalVolumeExceeded`      | Limit        | Protocol volume cap hit            |
 | 29   | `InvalidBatchSize`          | Validation   | Configured batch limit invalid     |
-| 30   | `ContractPausedError`       | State        | Subscribe while paused             |
-| 32   | `InvalidRecipient`          | Validation   | Recipient address invalid          |
+| 30   | `ContractPausedError` (deprecated) | Compatibility | Legacy paused code; never emitted |
+| 31   | *(reserved)*                | Reserved     | Historical gap; never emitted      |
+| 32   | `InvalidRecipient`          | Validation   | Recipient address invalid           |
+| 33   | `InvalidVolumeCap`          | Validation   | Volume cap override not positive   |
+| 34   | `InvalidFeeBounds`          | Validation   | Fee bounds min/max invalid         |
+| 35   | `FeeOutOfBoundsAtCommit`    | Validation   | Pending fee outside bounds         |
+| 36   | `ArithmeticOverflow`        | State        | Checked arithmetic would overflow  |
+| 38   | `RefundMerchantMismatch`    | Validation   | Refund caller is not merchant     |
+| 39   | `RefundAmountMustBePositive`| Validation   | Prorated refund is zero           |
+| 40   | `InsufficientMerchantBalance`| Limit       | Merchant cannot fund refund       |
+| 41   | `CannotClearActiveSubscriber` | State      | Admin index repair of an active subscriber |
+| 42   | `SchemaMigrationRequired`   | State        | Stale schema — subscription writes denied until migrate |
+| 43   | `ResumeGraceLapsed`         | State        | Resume after grace period elapsed |
 
-> **Note:** Code `31` is intentionally unused. Source of truth: [`contract/src/errors.rs`](../contract/src/errors.rs).
+> **Compatibility:** code 18 (`ContractPaused`) is the sole canonical contract-paused error and is emitted by every pause guard. `ContractPausedError` remains a deprecated Rust enum variant at code 30 only for source/wire compatibility with clients that published that value; it is never emitted by current WASM. Code 31 is intentionally reserved and has no enum variant in the published map. Code 37 remains unassigned; new errors must use a new code and update this table, frontend handling, and mapping tests together. Source of truth: [`contract/src/errors.rs`](../contract/src/errors.rs).
 
 ---
 
@@ -164,7 +175,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 **Recovery steps**
 
 1. Verify deployment completed and `initialize(token, admin, …)` succeeded.
-2. Run post-deploy verification (`scripts/verify-contract.sh` or health reads).
+2. Run post-deploy verification (`contract_health_check` and `npx tsx scripts/health-check.ts`; see [`DEPLOYMENT.md`](DEPLOYMENT.md#post-deployment-health-gates)).
 3. Only then open the contract to users/keepers.
 
 **Prevention:** Gate frontend and keeper startup on a successful health/schema check.
@@ -173,10 +184,20 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 ### 8 — `InsufficientAllowance`
 
-| Field               | Detail                                                               |
-| ------------------- | -------------------------------------------------------------------- |
-| **When it occurs**  | Charge or subscribe path finds token allowance below required amount |
-| **Immediate cause** | SAC `allowance(user → FlowPay)` is too low or spent down             |
+| Field               | Detail                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| **When it occurs**  | Charge, subscribe, or pay-per-use path finds token allowance below required amount |
+| **Immediate cause** | SAC `allowance(user → FlowPay)` is too low or spent down                           |
+
+`charge()` and `pay_per_use*()` preflight the allowance against the **gross**
+amount before any transfer runs. When a protocol fee is configured the charge
+is pulled in two legs (fee → collector, net → merchant) against that same
+allowance, so an allowance covering only the fee leg is rejected up front
+rather than part-way through. Budget for `amount`, not `amount - fee`.
+
+`batch_charge()` does **not** raise this error: it records
+`ChargeResult::AllowanceInsufficient` for that subscriber and continues the
+batch. See [`EVENTS.md`](EVENTS.md#batch_charge_skips).
 
 **Recovery steps**
 
@@ -570,14 +591,127 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 ---
 
+### 33 — `InvalidVolumeCap`
+
+| Field               | Detail                                                 |
+| ------------------- | ------------------------------------------------------ |
+| **When it occurs**  | Admin `set_global_volume_cap` with `new_cap <= 0`      |
+| **Immediate cause** | Configured hourly volume cap must be strictly positive |
+
+**Recovery steps**
+
+1. Choose a positive cap in stroops.
+2. Retry `set_global_volume_cap` as admin.
+
+**Prevention:** Validate `new_cap > 0` in admin tooling. See [`MAINNET-DEPLOYMENT.md`](./MAINNET-DEPLOYMENT.md#2-volume-cap).
+
+---
+
+### 34 — `InvalidFeeBounds`
+
+| Field               | Detail                                                                |
+| ------------------- | --------------------------------------------------------------------- |
+| **When it occurs**  | Admin `set_fee_bounds` with `min_bps > max_bps` or `max_bps > 10_000` |
+| **Immediate cause** | Fee bound range is empty or exceeds 100% (10_000 bps)                 |
+
+**Recovery steps**
+
+1. Choose `min_bps <= max_bps` with `max_bps <= 10000`.
+2. Retry `set_fee_bounds` as admin.
+
+**Prevention:** Validate bounds in admin UI before signing. See [`API.md`](./API.md#set_fee_bounds).
+
+---
+
+### 35 — `FeeOutOfBoundsAtCommit`
+
+| Field               | Detail                                                                          |
+| ------------------- | ------------------------------------------------------------------------------- |
+| **When it occurs**  | `commit_fee` when pending bps is outside current `[MinFeeBps, MaxFeeBps]`       |
+| **Immediate cause** | Bounds were tightened (or never matched) between `propose_fee` and `commit_fee` |
+
+**Recovery steps**
+
+1. Call `get_fee_bounds` and `get_fee` / inspect pending proposal.
+2. Either `set_fee_bounds` to include the pending bps, or `propose_fee` again with in-range bps, then `commit_fee`.
+
+**Prevention:** Set bounds before proposing; do not tighten bounds under an in-flight proposal unless that is intended.
+
+---
+
+### 36 — `ArithmeticOverflow`
+
+| Field               | Detail                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **When it occurs**  | A checked operation would leave range: trial extension, fee multiplication, protocol-fee accrual, or global volume accumulation |
+| **Immediate cause** | Inputs or accumulated state near the type's limit (`u64::MAX`, `i128::MAX`)                                                     |
+
+**Recovery steps**
+
+1. Do not retry unchanged — the same inputs overflow deterministically.
+2. Shrink the offending input (e.g. a smaller `additional_seconds` on `extend_trial`, a smaller amount).
+3. If the overflow came from accumulated protocol state rather than the call's
+   inputs, escalate: the counter, not the caller, is at its limit.
+
+**Distinct from `28 GlobalVolumeExceeded`:** #28 means the protocol is at its
+hourly volume cap (a policy decision, retry next window); #36 means the value
+is not representable at all.
+
+**Prevention:** Bound amounts and durations client-side against the documented caps.
+
+---
+
+### 41 — `CannotClearActiveSubscriber`
+
+| Field               | Detail                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| **When it occurs**  | `clear_subscriber_index_entry` is called on a slot whose occupant still has an active subscription |
+| **Immediate cause** | Admin repair refused: the index entry is not stale                                              |
+
+**Recovery steps**
+
+1. Confirm the occupant with `get_subscriber_at(index)` and `get_subscription(user)`.
+2. If the subscription should remain live, do **not** clear the slot — keepers still need it.
+3. If the subscriber should leave the index, cancel (or otherwise deactivate) first, then retry the repair only if the slot was left un-tombstoned.
+
+**Prevention:** Use this repair only for stale/corrupt slots, never as a substitute for `cancel()`.
+
+---
+
+### 42 — `SchemaMigrationRequired`
+
+| Field               | Detail |
+| ------------------- | ------ |
+| **When it occurs**  | `migration::require_current_version` panics because `get_schema_version() < CURRENT_VERSION` (3). Intended on **new subscription-blob writes** (`subscribe` / `subscribe_with_metadata` via `subscribe_inner`). |
+| **Immediate cause** | On-chain schema has not finished catch-up after a WASM upgrade (or a fresh instance that has never been migrated). This is the **write-denial safety rail**, not a client validation bug. |
+| **Invariant**       | Documented on `require_current_version` in [`contract/src/migration.rs`](../contract/src/migration.rs): mixed-version `Subscription` blobs must not be created while operators are still paging `migrate()`. |
+
+**Recovery steps**
+
+Follow the canonical operator procedure in [`DEPLOYMENT.md` — SchemaMigrationRequired (error 42)](DEPLOYMENT.md#schemamigrationrequired-error-42). In short:
+
+1. Read `get_schema_version` (expect 0, 1, or 2 while blocked).
+2. As **admin**, page `get_subscriber_page` and call `migrate --users '[...]'` until version is **3**.
+3. Retry the subscribe call.
+
+`migrate` itself is **not** blocked by this error (`require_admin` only). Other admin paths (pause, whitelist, two-step upgrade, fee propose/commit) also do not call `require_current_version`.
+
+**Prevention:** After every layout-changing WASM commit, finish paged `migrate` and confirm `get_schema_version() == 3` before opening subscribe to users. See [`DEPLOYMENT.md` — State Migration](DEPLOYMENT.md#state-migration).
+
+---
+
 ## Error Categories
 
+| Category       | Codes                                                | Typical owners                |
+| -------------- | ---------------------------------------------------- | ----------------------------- |
+| Auth / access  | 8, 10, 22                                            | User + admin                  |
+| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36           | Deployer, user, admin, keeper |
 | Category       | Codes                                    | Typical owners                |
 | -------------- | ---------------------------------------- | ----------------------------- |
 | Auth / access  | 8, 10, 22                                | User + admin                  |
-| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30   | Deployer, user, admin, keeper |
-| Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32 | Client / admin tooling        |
-| Limit / timing | 6, 9, 15, 20, 25, 28                     | Keeper + user                 |
+| State          | 1, 4, 5, 7, 16, 17, 18, 21, 23, 24, 30, 36, 41, 42 | Deployer, user, admin, keeper |
+| Validation     | 2, 3, 11, 12, 13, 14, 19, 26, 27, 29, 32, 33, 34, 35 | Client / admin tooling        |
+| Limit / timing | 6, 9, 15, 20, 25, 28                                 | Keeper + user                 |
 
 ---
 
@@ -669,7 +803,7 @@ Use the [quick-reference table](#quick-reference-table) for lookups, then jump t
 
 | Codes     | Guidance                                                  |
 | --------- | --------------------------------------------------------- |
-| 7, 18, 30 | “Service temporarily unavailable.”                        |
+| 7, 18, 42 | “Service temporarily unavailable.” (42 = schema migration in progress — operators: [`DEPLOYMENT.md`](DEPLOYMENT.md#schemamigrationrequired-error-42)) |
 | 10        | “Merchant pending approval.”                              |
 | 28        | “Protocol capacity reached; try later.”                   |
 | 20, 29    | Operator/config bugs — log to telemetry, don’t blame user |
@@ -681,6 +815,8 @@ Always map numeric Soroban contract errors to this document before inventing new
 ## Related
 
 - Contract source: [`contract/src/errors.rs`](../contract/src/errors.rs)
+- Schema write-denial invariant: [`docs/DEPLOYMENT.md` — SchemaMigrationRequired](DEPLOYMENT.md#schemamigrationrequired-error-42) (`contract/src/migration.rs`)
+- Troubleshooting runbook: [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 - Keeper guide: [`docs/KEEPER.md`](KEEPER.md)
 - API reference: [`docs/API.md`](API.md)
 - Security model: [`docs/SECURITY.md`](SECURITY.md)

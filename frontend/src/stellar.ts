@@ -45,7 +45,8 @@ export const server = new Server(RPC_URL);
  */
 export function getServer(): Server {
   try {
-    const stored = window.localStorage.getItem("flowpay_custom_rpc_url");
+    const stored =
+      typeof localStorage !== "undefined" ? localStorage.getItem("flowpay_custom_rpc_url") : null;
     const customUrl: string | null = stored ? (JSON.parse(stored) as string) : null;
     if (customUrl) return new Server(customUrl);
   } catch {
@@ -79,6 +80,13 @@ export interface ContractEvent {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/** Practical C-prefixed Stellar contract ID shape check */
+export function isValidContractIdShape(id: string): boolean {
+  return (
+    typeof id === "string" && id.startsWith("C") && id.length === 56 && /^[A-Z0-9]+$/i.test(id)
+  );
+}
+
 /** Convert a Stellar public key string to an ScVal Address */
 function addressVal(addr: string): xdr.ScVal {
   return nativeToScVal(Address.fromString(addr), { type: "address" });
@@ -90,7 +98,29 @@ async function buildTx(
   method: string,
   args: xdr.ScVal[]
 ): Promise<string> {
-  const account = await server.getAccount(sourcePublicKey);
+  if (!CONTRACT_ID) {
+    throw new Error("VITE_CONTRACT_ID environment variable is not set");
+  }
+
+  if (!isValidContractIdShape(CONTRACT_ID)) {
+    throw new Error("VITE_CONTRACT_ID is not a valid Soroban contract address");
+  }
+
+  if (typeof window !== "undefined" && window.freighter) {
+    try {
+      const { networkPassphrase } = await window.freighter.getNetwork();
+      if (networkPassphrase !== NETWORK_PASSPHRASE) {
+        throw new Error(
+          "Wallet network passphrase mismatch with configured VITE_NETWORK_PASSPHRASE"
+        );
+      }
+    } catch {
+      // Older Freighter or getNetwork failure
+    }
+  }
+
+  const s = getServer();
+  const account = await s.getAccount(sourcePublicKey);
   const contract = new Contract(CONTRACT_ID);
 
   const tx = new TransactionBuilder(account, {
@@ -101,7 +131,7 @@ async function buildTx(
     .setTimeout(30)
     .build();
 
-  const simResult = await server.simulateTransaction(tx);
+  const simResult = await s.simulateTransaction(tx);
   if ("error" in simResult) throw new Error(simResult.error);
 
   const assembled = assembleTransaction(tx, simResult) as unknown as { toXDR(): string };
@@ -143,8 +173,22 @@ export async function buildPauseTx(user: string): Promise<string> {
   return buildTx(user, "pause", [addressVal(user)]);
 }
 
+/**
+ * Builds a `pause_until` transaction that pauses the subscription up to a
+ * specific Unix timestamp (seconds). The contract rejects (InvalidPauseExpiry)
+ * any `expiry` that is not strictly in the future, so callers should validate
+ * client-side before building the transaction to avoid a wasted round trip.
+ */
+export async function buildPauseUntilTx(user: string, expiry: bigint): Promise<string> {
+  return buildTx(user, "pause_until", [addressVal(user), nativeToScVal(expiry, { type: "u64" })]);
+}
+
 export async function buildResumeTx(user: string): Promise<string> {
   return buildTx(user, "resume", [addressVal(user)]);
+}
+
+export async function buildTransferSubscriptionTx(user: string, newUser: string): Promise<string> {
+  return buildTx(user, "transfer_subscription", [addressVal(user), addressVal(newUser)]);
 }
 
 export async function buildSetDailyLimitTx(user: string, amount: bigint): Promise<string> {
@@ -176,7 +220,8 @@ export async function simulateBatchCharge(
 ): Promise<BatchChargeOutcome[]> {
   if (users.length === 0) return [];
 
-  const account = await server.getAccount(merchantWallet);
+  const s = getServer();
+  const account = await s.getAccount(merchantWallet);
   const contract = new Contract(CONTRACT_ID);
 
   const tx = new TransactionBuilder(account, {
@@ -190,7 +235,7 @@ export async function simulateBatchCharge(
     .setTimeout(30)
     .build();
 
-  const simResult = await server.simulateTransaction(tx);
+  const simResult = await s.simulateTransaction(tx);
   if ("error" in simResult) throw new Error(simResult.error);
 
   // Best-effort decode of return Vec<ChargeResult>
@@ -235,8 +280,9 @@ export async function simulateBatchCharge(
  */
 export function getTrialEnd(user: string): Promise<bigint | null> {
   return dedupedCall(`getTrialEnd:${user}`, async () => {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(user);
+    const account = await s.getAccount(user);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -246,7 +292,7 @@ export function getTrialEnd(user: string): Promise<bigint | null> {
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) throw new Error((result as { error: string }).error);
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -258,8 +304,9 @@ export function getTrialEnd(user: string): Promise<bigint | null> {
 
 export function getDailyLimit(user: string): Promise<bigint | null> {
   return dedupedCall(`getDailyLimit:${user}`, async () => {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(user);
+    const account = await s.getAccount(user);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -269,7 +316,7 @@ export function getDailyLimit(user: string): Promise<bigint | null> {
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) throw new Error((result as { error: string }).error);
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -281,8 +328,9 @@ export function getDailyLimit(user: string): Promise<bigint | null> {
 
 export function getDailySpent(user: string): Promise<bigint> {
   return dedupedCall(`getDailySpent:${user}`, async () => {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(user);
+    const account = await s.getAccount(user);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -292,7 +340,7 @@ export function getDailySpent(user: string): Promise<bigint> {
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) throw new Error((result as { error: string }).error);
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -306,6 +354,63 @@ export function getDailySpent(user: string): Promise<bigint> {
   });
 }
 
+export function getDayStart(user: string): Promise<bigint | null> {
+  return dedupedCall(`getDayStart:${user}`, async () => {
+    const contract = new Contract(CONTRACT_ID);
+    const account = await server.getAccount(user);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(contract.call("get_day_start", addressVal(user)))
+      .setTimeout(30)
+      .build();
+
+    const result = await server.simulateTransaction(tx);
+    if ("error" in result) throw new Error((result as { error: string }).error);
+
+    const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+    if (!retval || retval.switch().name === "scvVoid") return null;
+
+    // Contract returns Option<u64> (timestamp of window start). Some deployments may return bool.
+    const type = retval.switch().name;
+    if (type === "scvBool") {
+      return retval.b() ? 1n : null;
+    }
+    try {
+      const decoded = ScValDecoder.decodeOption(retval, ScValDecoder.decodeU64);
+      return decoded;
+    } catch {
+      // Fallback: try direct u64
+      try {
+        return ScValDecoder.decodeU64(retval);
+      } catch {
+        return null;
+      }
+    }
+  });
+}
+
+export interface DailyLimitStatus {
+  limit: bigint | null;
+  spent: bigint;
+  remaining: bigint | null;
+  dayActive: boolean;
+  dayStart: bigint | null;
+}
+
+export async function getDailyLimitStatus(user: string): Promise<DailyLimitStatus> {
+  const [limit, spent, dayStart] = await Promise.all([
+    getDailyLimit(user),
+    getDailySpent(user),
+    getDayStart(user),
+  ]);
+  const dayActive = dayStart !== null;
+  const remaining = limit !== null ? (limit > spent ? limit - spent : 0n) : null;
+  return { limit, spent, remaining, dayActive, dayStart };
+}
+
 export async function buildApproveTx(
   user: string,
   tokenId: string,
@@ -313,7 +418,8 @@ export async function buildApproveTx(
   amount: bigint
 ): Promise<string> {
   const tokenContract = new Contract(tokenId);
-  const account = await server.getAccount(user);
+  const s = getServer();
+  const account = await s.getAccount(user);
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
@@ -331,7 +437,7 @@ export async function buildApproveTx(
     .setTimeout(30)
     .build();
 
-  const simResult = await server.simulateTransaction(tx);
+  const simResult = await s.simulateTransaction(tx);
   if ("error" in simResult) throw new Error(simResult.error);
 
   const assembled = assembleTransaction(tx, simResult) as unknown as { toXDR(): string };
@@ -340,8 +446,9 @@ export async function buildApproveTx(
 
 export function getSubscription(user: string): Promise<Subscription | null> {
   return dedupedCall(`getSubscription:${user}`, async () => {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(user);
+    const account = await s.getAccount(user);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -351,7 +458,7 @@ export function getSubscription(user: string): Promise<Subscription | null> {
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) throw new Error((result as { error: string }).error);
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -387,8 +494,9 @@ export function getSubscription(user: string): Promise<Subscription | null> {
 
 export async function getSubscriptionMetadata(user: string): Promise<string | null> {
   try {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(user);
+    const account = await s.getAccount(user);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -398,7 +506,7 @@ export async function getSubscriptionMetadata(user: string): Promise<string | nu
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) return null;
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -410,19 +518,149 @@ export async function getSubscriptionMetadata(user: string): Promise<string | nu
   }
 }
 
+/** Mirrors contract `SubscriptionHealth` from `get_subscription_health`. */
 export interface SubscriptionHealth {
-  charged_up: boolean;
-  allowance_ok: boolean;
-  trial_active: boolean;
-  paused: boolean;
+  active: boolean;
   charge_due: boolean;
+  within_grace: boolean;
+  has_sufficient_allowance: boolean;
+  is_paused: boolean;
+  trial_active: boolean;
+  daily_limit_set: boolean;
+}
+
+export const CHARGE_SIM_RESULTS = [
+  "WouldSucceed",
+  "NotDue",
+  "Inactive",
+  "InsufficientAllowance",
+  "GracePeriodElapsed",
+  "ContractPaused",
+  "SubscriptionPaused",
+] as const;
+
+export type ChargeSimResult = (typeof CHARGE_SIM_RESULTS)[number];
+
+export const CHARGE_SIM_LABELS: Record<ChargeSimResult, string> = {
+  WouldSucceed: "Next charge would succeed",
+  NotDue: "Next charge is not due yet",
+  Inactive: "No active subscription to charge",
+  InsufficientAllowance: "Allowance is too low for the next charge",
+  GracePeriodElapsed: "Grace period has elapsed — recurring charge would fail",
+  ContractPaused: "Protocol is paused",
+  SubscriptionPaused: "Subscription is paused — charge would fail",
+};
+
+export function normalizeSubscriptionHealth(
+  raw: Partial<SubscriptionHealth> | null | undefined
+): SubscriptionHealth | null {
+  if (!raw) return null;
+  return {
+    active: !!raw.active,
+    charge_due: !!raw.charge_due,
+    within_grace: !!raw.within_grace,
+    has_sufficient_allowance: !!raw.has_sufficient_allowance,
+    is_paused: !!raw.is_paused,
+    trial_active: !!raw.trial_active,
+    daily_limit_set: !!raw.daily_limit_set,
+  };
+}
+
+export function isSubscriptionHealthy(health: SubscriptionHealth): boolean {
+  return health.active && health.has_sufficient_allowance && !health.is_paused;
+}
+
+export function subscriptionHasWarnings(health: SubscriptionHealth): boolean {
+  return !isSubscriptionHealthy(health) || health.within_grace || health.charge_due;
+}
+
+/** States that would make pay-per-use fail on-chain. */
+export function subscriptionHealthBlocksPay(health: SubscriptionHealth | null): boolean {
+  if (!health) return false;
+  return !health.active || health.is_paused;
+}
+
+export function chargeSimIsRisky(result: ChargeSimResult | null): boolean {
+  return (
+    result === "InsufficientAllowance" ||
+    result === "GracePeriodElapsed" ||
+    result === "ContractPaused" ||
+    result === "SubscriptionPaused" ||
+    result === "Inactive"
+  );
+}
+
+export function chargeSimBlocksPay(result: ChargeSimResult | null): boolean {
+  return result === "ContractPaused" || result === "SubscriptionPaused" || result === "Inactive";
+}
+
+export function payBlockedReason(
+  health: SubscriptionHealth | null,
+  sim: ChargeSimResult | null
+): string | null {
+  if (health?.is_paused || sim === "SubscriptionPaused") {
+    return "Pay-per-use is unavailable while the subscription is paused. Resume first.";
+  }
+  if ((health && !health.active) || sim === "Inactive") {
+    return "Pay-per-use requires an active subscription.";
+  }
+  if (sim === "ContractPaused") {
+    return "Pay-per-use is unavailable while the protocol is paused.";
+  }
+  return null;
+}
+
+export function payWarningReason(
+  health: SubscriptionHealth | null,
+  sim: ChargeSimResult | null
+): string | null {
+  if (payBlockedReason(health, sim)) return null;
+  if ((health && !health.has_sufficient_allowance) || sim === "InsufficientAllowance") {
+    return "Token allowance is insufficient. Increase allowance before paying or the charge may fail.";
+  }
+  if (health?.within_grace) {
+    return "Subscription is in its grace period. Recurring charge is overdue.";
+  }
+  if (sim === "GracePeriodElapsed") {
+    return "Grace period has elapsed. Recurring charge would fail until the subscription is repaired.";
+  }
+  if (health?.charge_due) {
+    return "A recurring charge is currently due.";
+  }
+  return null;
+}
+
+/** Decode a unit `ChargeSimResult` enum (symbol or vec-wrapped symbol). */
+export function decodeChargeSimResult(
+  retval: xdr.ScVal | null | undefined
+): ChargeSimResult | null {
+  if (!retval) return null;
+  try {
+    const type = retval.switch().name;
+    let name: string | null = null;
+    if (type === "scvSymbol") {
+      name = retval.sym().toString();
+    } else if (type === "scvVec") {
+      const vec = retval.vec() ?? [];
+      if (vec.length > 0 && vec[0].switch().name === "scvSymbol") {
+        name = vec[0].sym().toString();
+      }
+    }
+    if (name && (CHARGE_SIM_RESULTS as readonly string[]).includes(name)) {
+      return name as ChargeSimResult;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function getSubscriptionHealth(user: string): Promise<SubscriptionHealth | null> {
   return dedupedCall(`getSubscriptionHealth:${user}`, async () => {
     try {
+      const s = getServer();
       const contract = new Contract(CONTRACT_ID);
-      const account = await server.getAccount(user);
+      const account = await s.getAccount(user);
 
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -432,25 +670,54 @@ export function getSubscriptionHealth(user: string): Promise<SubscriptionHealth 
         .setTimeout(30)
         .build();
 
-      const result = await server.simulateTransaction(tx);
+      const result = await s.simulateTransaction(tx);
       if ("error" in result) throw new Error((result as { error: string }).error);
 
       const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
       if (!retval || retval.switch().name === "scvVoid") return null;
 
-      return ScValDecoder.decodeStruct(retval, {
-        charged_up: ScValDecoder.decodeBool,
-        allowance_ok: ScValDecoder.decodeBool,
-        trial_active: ScValDecoder.decodeBool,
-        paused: ScValDecoder.decodeBool,
-        charge_due: ScValDecoder.decodeBool,
-      });
+      return normalizeSubscriptionHealth(
+        ScValDecoder.decodeStruct(retval, {
+          active: ScValDecoder.decodeBool,
+          charge_due: ScValDecoder.decodeBool,
+          within_grace: ScValDecoder.decodeBool,
+          has_sufficient_allowance: ScValDecoder.decodeBool,
+          is_paused: ScValDecoder.decodeBool,
+          trial_active: ScValDecoder.decodeBool,
+          daily_limit_set: ScValDecoder.decodeBool,
+        })
+      );
     } catch {
       return null;
     }
   });
 }
 
+/** Dry-run of on-chain `simulate_charge` — no storage writes or transfers. */
+export function simulateCharge(user: string): Promise<ChargeSimResult | null> {
+  return dedupedCall(`simulateCharge:${user}`, async () => {
+    try {
+      const contract = new Contract(CONTRACT_ID);
+      const account = await server.getAccount(user);
+
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("simulate_charge", addressVal(user)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) throw new Error((result as { error: string }).error);
+
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      return decodeChargeSimResult(retval);
+    } catch {
+      return null;
+    }
+  });
+}
 
 function parseEventValueField(value: any, field: string): string {
   if (!value) return "";
@@ -563,8 +830,9 @@ export async function getMerchantSubscribers(merchant: string): Promise<Merchant
 
 export async function getMerchantRevenueHistory(merchant: string, days = 7): Promise<bigint[]> {
   try {
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
-    const account = await server.getAccount(merchant);
+    const account = await s.getAccount(merchant);
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -580,7 +848,7 @@ export async function getMerchantRevenueHistory(merchant: string, days = 7): Pro
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) return [];
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -595,8 +863,9 @@ export async function getMerchantRevenueHistory(merchant: string, days = 7): Pro
 export function getMerchantRevenue(merchant: string): Promise<bigint> {
   return dedupedCall(`getMerchantRevenue:${merchant}`, async () => {
     try {
+      const s = getServer();
       const contract = new Contract(CONTRACT_ID);
-      const account = await server.getAccount(merchant);
+      const account = await s.getAccount(merchant);
 
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -606,7 +875,7 @@ export function getMerchantRevenue(merchant: string): Promise<bigint> {
         .setTimeout(30)
         .build();
 
-      const result = await server.simulateTransaction(tx);
+      const result = await s.simulateTransaction(tx);
       if ("error" in result) return 0n;
 
       const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -621,6 +890,10 @@ export function getMerchantRevenue(merchant: string): Promise<bigint> {
       return 0n;
     }
   });
+}
+
+export async function buildWithdrawMerchantRevenueTx(merchant: string): Promise<string> {
+  return buildTx(merchant, "withdraw_merchant_revenue", [addressVal(merchant)]);
 }
 
 export async function getBalance(
@@ -645,13 +918,47 @@ export async function getBalance(
   }
 }
 
+export function getTokenBalance(owner: string, tokenId: string): Promise<bigint> {
+  if (!tokenId) return Promise.reject(new Error("Token ID is required."));
+
+  return dedupedCall(`getTokenBalance:${owner}:${tokenId}`, async () => {
+    try {
+      const tokenContract = new Contract(tokenId);
+      const account = await server.getAccount(owner);
+
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(tokenContract.call("balance", addressVal(owner)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) return 0n;
+
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      if (!retval) return 0n;
+
+      try {
+        return ScValDecoder.decodeI128(retval);
+      } catch {
+        return 0n;
+      }
+    } catch {
+      return 0n;
+    }
+  });
+}
+
 export function getAllowance(owner: string, tokenId = TOKEN_CONTRACT_ID): Promise<bigint> {
   if (!tokenId) return Promise.reject(new Error("VITE_TOKEN_CONTRACT_ID is not configured."));
 
   return dedupedCall(`getAllowance:${owner}:${tokenId}`, async () => {
     try {
+      const s = getServer();
       const tokenContract = new Contract(tokenId);
-      const account = await server.getAccount(owner);
+      const account = await s.getAccount(owner);
 
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -667,7 +974,7 @@ export function getAllowance(owner: string, tokenId = TOKEN_CONTRACT_ID): Promis
         .setTimeout(30)
         .build();
 
-      const result = await server.simulateTransaction(tx);
+      const result = await s.simulateTransaction(tx);
       if ("error" in result) return 0n;
 
       const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -799,6 +1106,7 @@ export async function getContractPaused(): Promise<boolean | null> {
       "0"
     );
 
+    const s = getServer();
     const contract = new Contract(CONTRACT_ID);
     const tx = new TransactionBuilder(source, {
       fee: BASE_FEE,
@@ -808,7 +1116,7 @@ export async function getContractPaused(): Promise<boolean | null> {
       .setTimeout(30)
       .build();
 
-    const result = await server.simulateTransaction(tx);
+    const result = await s.simulateTransaction(tx);
     if ("error" in result) return null;
 
     const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
@@ -842,7 +1150,7 @@ export async function getContractHealth(caller: string): Promise<ContractHealthR
   };
 
   try {
-    await server.getHealth();
+    await getServer().getHealth();
     report.rpcReachable = true;
   } catch {
     return report;
@@ -852,7 +1160,8 @@ export async function getContractHealth(caller: string): Promise<ContractHealthR
 
   async function simCall(method: string, args: xdr.ScVal[] = []): Promise<xdr.ScVal | null> {
     try {
-      const account = await server.getAccount(caller);
+      const s = getServer();
+      const account = await s.getAccount(caller);
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: NETWORK_PASSPHRASE,
@@ -860,7 +1169,7 @@ export async function getContractHealth(caller: string): Promise<ContractHealthR
         .addOperation(contract.call(method, ...args))
         .setTimeout(30)
         .build();
-      const result = await server.simulateTransaction(tx);
+      const result = await s.simulateTransaction(tx);
       if ("error" in result) return null;
       return (result as { result?: { retval?: xdr.ScVal } }).result?.retval ?? null;
     } catch {
@@ -886,6 +1195,82 @@ export async function getContractHealth(caller: string): Promise<ContractHealthR
   }
 
   return report;
+}
+
+// ── Protocol stats / health check (read-only, mirrors contract types) ───────
+
+/** Mirrors contract `ProtocolStats` from `get_protocol_stats`. */
+export interface ProtocolStats {
+  activeCount: bigint;
+  feeBps: number;
+  feeCollector: string | null;
+  gracePeriod: bigint;
+  whitelistEnabled: boolean;
+  schemaVersion: number;
+  contractPaused: boolean;
+}
+
+/** Mirrors contract `HealthReport` from `contract_health_check`. */
+export interface ContractHealthCheckReport {
+  isHealthy: boolean;
+  contractPaused: boolean;
+  tokenConfigured: boolean;
+  adminConfigured: boolean;
+  instanceTtlLedgers: number;
+  activeSubscriptionCount: bigint;
+  schemaVersion: number;
+  feeCollectorSet: boolean;
+  globalVolumeUtilizationPct: number;
+  pendingMerchantRevCount: number;
+}
+
+const decodeU32 = (v: xdr.ScVal): number => Number(v.u32());
+
+/** Reads aggregate protocol stats (active count, fee, grace, pause, schema version). */
+export function getProtocolStats(caller: string): Promise<ProtocolStats | null> {
+  return dedupedCall(`getProtocolStats:${caller}`, async () => {
+    try {
+      const retval = await simulateContractRead(caller, "get_protocol_stats", []);
+      if (!retval || retval.switch().name === "scvVoid") return null;
+
+      return ScValDecoder.decodeStruct<ProtocolStats>(retval, {
+        activeCount: (v) => ScValDecoder.decodeU64(v),
+        feeBps: decodeU32,
+        feeCollector: (v) => ScValDecoder.decodeOption(v, ScValDecoder.decodeAddress),
+        gracePeriod: (v) => ScValDecoder.decodeU64(v),
+        whitelistEnabled: ScValDecoder.decodeBool,
+        schemaVersion: decodeU32,
+        contractPaused: ScValDecoder.decodeBool,
+      });
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** Runs the contract's own `contract_health_check` read-only diagnostic. */
+export function getContractHealthCheck(caller: string): Promise<ContractHealthCheckReport | null> {
+  return dedupedCall(`getContractHealthCheck:${caller}`, async () => {
+    try {
+      const retval = await simulateContractRead(caller, "contract_health_check", []);
+      if (!retval || retval.switch().name === "scvVoid") return null;
+
+      return ScValDecoder.decodeStruct<ContractHealthCheckReport>(retval, {
+        isHealthy: ScValDecoder.decodeBool,
+        contractPaused: ScValDecoder.decodeBool,
+        tokenConfigured: ScValDecoder.decodeBool,
+        adminConfigured: ScValDecoder.decodeBool,
+        instanceTtlLedgers: decodeU32,
+        activeSubscriptionCount: (v) => ScValDecoder.decodeU64(v),
+        schemaVersion: decodeU32,
+        feeCollectorSet: ScValDecoder.decodeBool,
+        globalVolumeUtilizationPct: decodeU32,
+        pendingMerchantRevCount: decodeU32,
+      });
+    } catch {
+      return null;
+    }
+  });
 }
 
 const VALIDATION_TIMEOUT_MS = 30_000;
@@ -958,7 +1343,8 @@ async function simulateContractRead(
   args: xdr.ScVal[],
   timeoutMs = VALIDATION_TIMEOUT_MS
 ): Promise<xdr.ScVal | null> {
-  const account = await server.getAccount(sourcePublicKey);
+  const s = getServer();
+  const account = await s.getAccount(sourcePublicKey);
   const contract = new Contract(CONTRACT_ID);
 
   const tx = new TransactionBuilder(account, {
@@ -969,7 +1355,7 @@ async function simulateContractRead(
     .setTimeout(30)
     .build();
 
-  const simPromise = server.simulateTransaction(tx);
+  const simPromise = s.simulateTransaction(tx);
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error("Validation request timed out")), timeoutMs);
   });
@@ -1054,7 +1440,8 @@ function parseFixedInconsistenciesFromEventValue(value: unknown): number | null 
 /** Extracts the fixed inconsistency count from a `subscription_repaired` contract event. */
 export async function parseSubscriptionRepairedEvent(txHash: string): Promise<number | null> {
   try {
-    const tx = await server.getTransaction(txHash);
+    const s = getServer();
+    const tx = await s.getTransaction(txHash);
     if (tx.status !== "SUCCESS") return null;
 
     const events = (tx as { events?: Array<{ topic?: unknown[]; value?: unknown }> }).events ?? [];
@@ -1070,7 +1457,7 @@ export async function parseSubscriptionRepairedEvent(txHash: string): Promise<nu
     }
 
     // Fallback: scan recent contract events tied to this transaction hash.
-    const response = await server.getEvents({
+    const response = await s.getEvents({
       startLedger: undefined,
       filters: [{ type: "contract", contractIds: [CONTRACT_ID] }],
       limit: 50,
@@ -1167,11 +1554,7 @@ const ARCHIVED_ERROR_PATTERNS = [
  */
 export function isArchivedError(err: unknown): boolean {
   const msg =
-    err instanceof Error
-      ? err.message
-      : typeof err === "string"
-        ? err
-        : JSON.stringify(err ?? "");
+    err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err ?? "");
 
   return ARCHIVED_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
 }
@@ -1202,7 +1585,8 @@ export async function estimateExtendTtlFee(
   subscriberAddress: string
 ): Promise<bigint | null> {
   try {
-    const account = await server.getAccount(callerPublicKey);
+    const s = getServer();
+    const account = await s.getAccount(callerPublicKey);
     const contract = new Contract(CONTRACT_ID);
 
     const tx = new TransactionBuilder(account, {
@@ -1213,7 +1597,7 @@ export async function estimateExtendTtlFee(
       .setTimeout(30)
       .build();
 
-    const simResult = await server.simulateTransaction(tx);
+    const simResult = await s.simulateTransaction(tx);
     if ("error" in simResult) return null;
 
     // The minResourceFee field is returned as a string by the RPC
@@ -1224,4 +1608,80 @@ export async function estimateExtendTtlFee(
   } catch {
     return null;
   }
+}
+
+export function getSubscriptionToken(user: string): Promise<string | null> {
+  return dedupedCall(`getSubscriptionToken:${user}`, async () => {
+    try {
+      const contract = new Contract(CONTRACT_ID);
+      const account = await server.getAccount(user);
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("get_subscription", addressVal(user)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) return null;
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      if (!retval || retval.switch().name === "scvVoid") return null;
+
+      const decoded = ScValDecoder.decodeStruct(retval, {
+        token: ScValDecoder.decodeAddress,
+      });
+      return decoded.token;
+    } catch {
+      return null;
+    }
+  });
+}
+
+export function getReferral(user: string): Promise<string | null> {
+  return dedupedCall(`getReferral:${user}`, async () => {
+    try {
+      const contract = new Contract(CONTRACT_ID);
+      const account = await server.getAccount(user);
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("get_referral", addressVal(user)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) return null;
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      if (!retval || retval.switch().name === "scvVoid") return null;
+      return ScValDecoder.decodeAddress(retval);
+    } catch {
+      return null;
+    }
+  });
+}
+
+export function getReferrer(user: string): Promise<string | null> {
+  return dedupedCall(`getReferrer:${user}`, async () => {
+    try {
+      const contract = new Contract(CONTRACT_ID);
+      const account = await server.getAccount(user);
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("get_referrer", addressVal(user)))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+      if ("error" in result) return null;
+      const retval = (result as { result?: { retval?: xdr.ScVal } }).result?.retval;
+      if (!retval || retval.switch().name === "scvVoid") return null;
+      return ScValDecoder.decodeAddress(retval);
+    } catch {
+      return null;
+    }
+  });
 }

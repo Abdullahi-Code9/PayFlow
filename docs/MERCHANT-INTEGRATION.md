@@ -181,6 +181,13 @@ When a keeper (or any account) successfully calls `charge(user)` / `batch_charge
 
 `pay_per_use(user, amount)` follows the same fee/net split and also increments merchant revenue, then emits `pay_per_use`.
 
+`pay_per_use_to(user, amount, recipient)` works the same way but routes the net payment to `recipient` instead of the subscription's merchant. This enables marketplace settlement, affiliate payouts, or splitting metered revenue. When using `pay_per_use_to`:
+
+1. **Whitelist re-validation:** If the merchant whitelist is enabled, `recipient` must be whitelisted — panics with `MerchantNotWhitelisted` (code 10) if not. This is a stricter check than `pay_per_use`, which trusts the merchant was validated at `subscribe` time.
+2. **Self-send prevention:** `recipient` cannot be the contract address — panics with `InvalidRecipient` (code 32).
+3. **Fee routing:** Fees are calculated against the `recipient` (not the subscription's merchant). The contract checks for a per-recipient custom fee recipient first, then falls back to the global fee collector (same resolution chain as subscription charges).
+4. **Revenue attribution:** `MerchantRevenue(recipient)` is incremented by the net amount, not the subscription merchant's counter.
+
 ```text
 Subscriber token balance
         │
@@ -211,7 +218,52 @@ There are two related notions:
 
 ### 2.3 Optional fee recipient
 
-Merchants can redirect net proceeds to a different address via `MerchantFeeRecipient` (admin/ops configuration). Details are in [`docs/MULTI-TOKEN.md`](MULTI-TOKEN.md). Revenue counters still key off the **merchant** identity used in `subscribe`, not the recipient wallet.
+Merchants can redirect net proceeds to a different address via `set_merchant_fee_recipient`. This affects both subscription charges and `pay_per_use` / `pay_per_use_to` calls routed through the merchant.
+
+**Setting a custom fee recipient (CLI):**
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source <MERCHANT_KEY> \
+  --network testnet \
+  -- set_merchant_fee_recipient \
+  --merchant <MERCHANT_ADDRESS> \
+  --recipient <FEE_RECIPIENT_ADDRESS>
+```
+
+**Setting a custom fee recipient (TypeScript):**
+
+```typescript
+async function setMerchantFeeRecipient(merchantKeypair, recipientAddress) {
+  const source = await server.getAccount(merchantKeypair.publicKey());
+  const tx = new TransactionBuilder(source, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      new Contract(CONTRACT_ID).call(
+        "set_merchant_fee_recipient",
+        addressVal(merchantKeypair.publicKey()),
+        addressVal(recipientAddress),
+      ),
+    )
+    .setTimeout(30)
+    .build();
+  const preparedTx = await server.prepareTransaction(tx);
+  preparedTx.sign(merchantKeypair);
+  return await server.sendTransaction(preparedTx);
+}
+```
+
+**Important notes:**
+
+- The `recipient` cannot be the contract address — this panics with `InvalidRecipient` (code 32).
+- The call requires merchant authentication (`merchant.require_auth()`).
+- Revenue counters still key off the **merchant** identity used in `subscribe`, not the fee recipient wallet. The fee recipient only changes where protocol fees are routed.
+- For `pay_per_use_to`, fee routing resolves against the **recipient** (the custom pay-per-use target), not the subscription merchant. This means a `pay_per_use_to` call to a different merchant will use that merchant's fee recipient configuration.
+
+Revenue counters still key off the **merchant** identity used in `subscribe`, not the recipient wallet. See [`docs/MULTI-TOKEN.md`](MULTI-TOKEN.md) for the full fee resolution chain.
 
 ---
 
@@ -394,6 +446,43 @@ For a continuous terminal watcher:
 npx tsx scripts/watch-events.ts
 ```
 
+### 4.2 Webhook Notifications
+
+`scripts/watch-events.ts` supports forwarding deduplicated contract events to an external system via signed webhooks.
+
+#### Configuration
+Set the following environment variables (e.g. in `scripts/.env`):
+* `WEBHOOK_URL`: The HTTP POST endpoint of your server.
+* `WEBHOOK_SECRET`: A shared secret string used to sign request bodies.
+* `WEBHOOK_DLQ_FILE`: Optional path to write failed deliveries after retry exhaustion (default: `data/webhook-dlq.jsonl`).
+
+#### Signature Verification
+Each request is signed with a deterministic HMAC-SHA256 signature calculated over the exact raw JSON request body bytes using `WEBHOOK_SECRET` as the key. The signature is sent as a hexadecimal string in the `X-PayFlow-Signature` header.
+
+To verify a webhook delivery:
+1. Read the raw request body buffer.
+2. Compute the HMAC-SHA256 hash using your configured shared secret.
+3. Compare the computed signature to the value in the `X-PayFlow-Signature` header using constant-time comparison.
+
+Example verification in Node.js:
+```typescript
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyWebhook(body: string, secret: string, headerSignature: string): boolean {
+  const computed = createHmac("sha256", secret).update(body).digest("hex");
+  const a = Buffer.from(computed);
+  const b = Buffer.from(headerSignature);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+#### Reliability & Retry Logic
+Webhook delivery handles network/server errors automatically:
+* **Transient errors** (HTTP 408, 429, 5xx, or network dropouts) are retried up to 5 times (6 attempts total) with exponential backoff.
+* The script respects the `Retry-After` header for rate-limiting (up to a maximum delay of 30 seconds).
+* **Permanent failures** (HTTP 4xx client errors) are aborted immediately without retry.
+* Failed payloads are logged to the Dead Letter Queue (DLQ) file without exposing the shared secret. Webhook failures do not disrupt the event polling daemon.
+
 ---
 
 ## 5. Withdrawing Revenue
@@ -507,6 +596,14 @@ Work through this checklist:
 
 The deployment has `set_whitelist_enabled(true)` and your address is not in `MerchantWhitelist`. Ask the admin to `add_merchant`, then retry. See [§ 1.3](#13-requesting-whitelist-access).
 
+### Why did `pay_per_use_to` fail with MerchantNotWhitelisted?
+
+The whitelist is enabled and the `recipient` address you specified is not whitelisted. Unlike `pay_per_use` (which trusts the merchant was validated at subscribe time), `pay_per_use_to` re-validates whitelist membership for the custom recipient. Ask the admin to `add_merchant` for the recipient address first. See [§ 1.3](#13-requesting-whitelist-access).
+
+### Why did `pay_per_use_to` or `set_merchant_fee_recipient` fail with InvalidRecipient?
+
+The `recipient` address is the contract address itself. Both `pay_per_use_to` and `set_merchant_fee_recipient` reject the contract address as a valid recipient. Use a regular Stellar account address (G...) instead.
+
 ### Why did `withdraw_merchant_revenue` panic?
 
 | Symptom                      | Cause                          | Fix                                                                   |
@@ -520,15 +617,16 @@ The deployment has `set_whitelist_enabled(true)` and your address is not in `Mer
 
 ## 7. Related Docs
 
-| Doc                                                                         | Why                                                      |
-| --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| [`INTEGRATION-GUIDE.md`](INTEGRATION-GUIDE.md)                              | Subscriber-side subscribe / charge / events              |
-| [`API.md`](API.md)                                                          | Full contract reference (merchant + admin entrypoints)   |
-| [`EVENTS.md`](EVENTS.md) / [`EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md) | Event schemas and reliable consumption                   |
-| [`KEEPER.md`](KEEPER.md)                                                    | Running the off-chain bill collector merchants depend on |
-| [`SUBSCRIBER-LIFECYCLE.md`](SUBSCRIBER-LIFECYCLE.md)                        | Trial, pause, cancel, grace semantics                    |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                                        | Storage keys, fee path, module map                       |
-| [`ERROR-CODES.md`](ERROR-CODES.md)                                          | Numeric contract errors                                  |
-| [`SECURITY.md`](SECURITY.md)                                                | Auth matrix for merchant vs admin calls                  |
-| [`MULTI-TOKEN.md`](MULTI-TOKEN.md)                                          | Per-subscription tokens and fee recipients               |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md)                                            | Deploying / configuring a testnet instance               |
+| Doc                                                                         | Why                                                         |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| [`INTEGRATION-GUIDE.md`](INTEGRATION-GUIDE.md)                              | Subscriber-side subscribe / charge / events                 |
+| [`API.md`](API.md)                                                          | Full contract reference (merchant + admin entrypoints)      |
+| [`EVENTS.md`](EVENTS.md) / [`EVENT-DRIVEN-GUIDE.md`](EVENT-DRIVEN-GUIDE.md) | Event schemas and reliable consumption                      |
+| [`KEEPER.md`](KEEPER.md)                                                    | Running the off-chain bill collector merchants depend on    |
+| [`SUBSCRIBER-LIFECYCLE.md`](SUBSCRIBER-LIFECYCLE.md)                        | Trial, pause, cancel, grace semantics                       |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                                        | Storage keys, fee path, module map                          |
+| [`ERROR-CODES.md`](ERROR-CODES.md)                                          | Numeric contract errors                                     |
+| [`SECURITY.md`](SECURITY.md)                                                | Auth matrix for merchant vs admin calls                     |
+| [`MULTI-TOKEN.md`](MULTI-TOKEN.md)                                          | Per-subscription tokens and fee recipients                  |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md)                                            | Deploying / configuring a testnet instance                  |
+| [`operations/troubleshooting.md`](operations/troubleshooting.md)            | Common ChargeResult errors, wallet failures, and ops issues |

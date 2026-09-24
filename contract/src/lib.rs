@@ -1,6 +1,9 @@
 #![no_std]
 #![allow(clippy::too_many_arguments, clippy::inconsistent_digit_grouping)]
 
+#[cfg(test)]
+extern crate std;
+
 mod admin;
 mod batch;
 #[cfg(feature = "bench")]
@@ -33,6 +36,7 @@ use soroban_sdk::{
 pub use batch::ChargeResult;
 pub use batch::CancelResult;
 pub use charge_exec::ChargeSimResult;
+pub use charge_exec::PayPerUseSimResult;
 
 // ─────────────────────────────────────────────────────────────
 // Storage keys
@@ -120,6 +124,8 @@ pub enum DataKey {
     // Feature: configurable min/max fee bps bounds
     MinFeeBps,
     MaxFeeBps,
+    // Feature: configurable whitelist batch size limit override
+    MaxWhitelistBatchSize,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -128,7 +134,13 @@ pub enum DataKey {
 
 pub const SUBSCRIPTION_TTL_LEDGERS: u32 = 6307200; // ~1 year (assuming 5s blocks)
 pub const MAX_BATCH_PAUSE_SUBSCRIPTIONS: u32 = 25;
+/// Default cap for the admin whitelist batch entrypoints. Overridable at
+/// runtime via `set_max_whitelist_batch_size`, bounded by `MAX_BATCH_SIZE_CEILING`.
 pub const MAX_WHITELIST_BATCH_SIZE: u32 = 50;
+/// Hard ceiling shared by every admin-configurable batch limit. Configured
+/// limits are never allowed above this value, so batches stay bounded even if
+/// an admin key is compromised.
+pub const MAX_BATCH_SIZE_CEILING: u32 = 200;
 pub const GLOBAL_MAX_VOLUME_PER_HOUR: i128 = 50_000_000_000_000; // 50 trillion stroops
 pub const HOUR_IN_SECONDS: u64 = 3600;
 pub const MAX_AMOUNT: i128 = 100_000_000_000;
@@ -168,18 +180,30 @@ pub struct SubscriptionHealth {
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
+pub struct DailyLimitStatus {
+    pub limit: Option<i128>,
+    pub spent: i128,
+    pub day_start: Option<u64>,
+    pub remaining: Option<i128>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HealthReport {
     pub is_healthy: bool,
     pub contract_paused: bool,
     pub token_configured: bool,
     pub admin_configured: bool,
+    /// Approximate instance TTL in ledgers. On-chain, this is a hardcoded
+    /// lower-bound estimate (100_000) because Soroban does not expose
+    /// `get_ttl()` outside test builds. Do not treat as precise.
     pub instance_ttl_ledgers: u32,
     pub active_subscription_count: u64,
     pub schema_version: u32,
     pub fee_collector_set: bool,
     pub global_volume_utilization_pct: u32,
+    /// Number of merchants with unwithdrawn revenue > 0.
     pub pending_merchant_rev_count: u32,
-    pub pending_merchant_revenue_count: u32,
 }
 
 #[contracttype]
@@ -245,6 +269,14 @@ pub struct FlowPay;
 
 #[contractimpl]
 impl FlowPay {
+    /// One-time deploy entrypoint: persists the default SAC token and the
+    /// contract admin. Admin must authorize this invoke.
+    ///
+    /// Deploy scripts (`scripts/deploy-pipeline.ts`, `scripts/testnet-setup.ts`)
+    /// depend on these invariants:
+    /// - arity is `initialize(token, admin)`
+    /// - a second call returns typed `ContractError::AlreadyInitialized` (code 1)
+    /// - success stores both token and admin, readable via `get_token` / `get_admin`
     pub fn initialize(env: Env, token: Address, admin: Address) {
         bump_instance_ttl(&env);
 
@@ -252,8 +284,19 @@ impl FlowPay {
             env.panic_with_error(ContractError::AlreadyInitialized);
         }
 
-        env.storage().instance().set(&DataKey::Token, &token);
+        // Authorize and persist admin before writing Token so a missing/invalid
+        // admin signature cannot leave a token-only (partial) initialization.
         admin::initialize_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Token, &token);
+    }
+
+    /// Permissionlessly refreshes the shared instance storage TTL.
+    ///
+    /// Keeper liveness probes may call this entrypoint during read- or
+    /// simulation-heavy periods. It does not require auth, inspect pause
+    /// state, transfer funds, or mutate protocol state.
+    pub fn bump_instance_ttl(env: Env) {
+        bump_instance_ttl(&env);
     }
 
     pub fn get_max_batch_size(env: Env) -> u32 {
@@ -262,10 +305,29 @@ impl FlowPay {
 
     pub fn set_max_batch_size(env: Env, size: u32) {
         admin::require_admin(&env);
-        if size > 200 {
+        if size > MAX_BATCH_SIZE_CEILING {
             env.panic_with_error(ContractError::InvalidBatchSize);
         }
         env.storage().instance().set(&DataKey::MaxBatchSize, &size);
+    }
+
+    /// Returns the batch cap applied to the admin whitelist batch entrypoints
+    /// (`whitelist_batch_add`, `whitelist_batch_remove`, `get_merchant_statuses`).
+    ///
+    /// This is a **separate** knob from `get_max_batch_size`, which bounds the
+    /// charge batches — see the design note in `whitelist.rs`. Defaults to
+    /// `MAX_WHITELIST_BATCH_SIZE` (50).
+    pub fn get_max_whitelist_batch_size(env: Env) -> u32 {
+        whitelist::get_max_whitelist_batch_size(&env)
+    }
+
+    /// Admin-only: overrides the whitelist batch cap.
+    ///
+    /// Panics with `InvalidBatchSize` when `size` is zero or exceeds
+    /// `MAX_BATCH_SIZE_CEILING` (200), so whitelist batches always stay bounded.
+    pub fn set_max_whitelist_batch_size(env: Env, size: u32) {
+        admin::require_admin(&env);
+        whitelist::set_max_whitelist_batch_size(&env, size);
     }
 
     pub fn get_contract_config(env: Env) -> ContractConfig {
@@ -302,11 +364,33 @@ impl FlowPay {
                 None => ChargeResult::NoSubscription,
                 Some(mut sub) => {
                     if sub.paused && charge_exec::try_auto_resume(&env, &user, &mut sub, now) {
-                        ChargeResult::Charged
+                        // Auto-resumed — fall through to allowance check below.
+                        // Re-run precheck on the now-active sub to be safe, then
+                        // mirror the same allowance check as the live batch path.
+                        match charge_exec::precheck_charge(&sub, now, grace_period) {
+                            Err(skip) => skip,
+                            Ok(()) => {
+                                if !validation::has_sufficient_allowance(
+                                    &env, &user, &sub.token, sub.amount,
+                                ) {
+                                    ChargeResult::AllowanceInsufficient
+                                } else {
+                                    ChargeResult::Charged
+                                }
+                            }
+                        }
                     } else {
                         match charge_exec::precheck_charge(&sub, now, grace_period) {
                             Err(skip) => skip,
-                            Ok(()) => ChargeResult::Charged,
+                            Ok(()) => {
+                                if !validation::has_sufficient_allowance(
+                                    &env, &user, &sub.token, sub.amount,
+                                ) {
+                                    ChargeResult::AllowanceInsufficient
+                                } else {
+                                    ChargeResult::Charged
+                                }
+                            }
                         }
                     }
                 }
@@ -483,6 +567,26 @@ impl FlowPay {
         charge_exec::simulate_charge(&env, user)
     }
 
+    /// Dry-run simulation of a `pay_per_use` call. Returns a PayPerUseSimResult
+    /// variant indicating whether the pay-per-use would succeed or the reason it
+    /// would fail (contract paused, invalid/inactive/paused subscription, daily
+    /// limit exceeded, or insufficient allowance). Performs no state writes.
+    pub fn simulate_pay_per_use(env: Env, user: Address, amount: i128) -> PayPerUseSimResult {
+        charge_exec::simulate_pay_per_use(&env, user, amount, None)
+    }
+
+    /// Dry-run simulation of a `pay_per_use_to` call. Mirrors
+    /// `simulate_pay_per_use` but also validates the `recipient` (contract-address
+    /// self-reference and merchant whitelist). Performs no state writes.
+    pub fn simulate_pay_per_use_to(
+        env: Env,
+        user: Address,
+        amount: i128,
+        recipient: Address,
+    ) -> PayPerUseSimResult {
+        charge_exec::simulate_pay_per_use(&env, user, amount, Some(recipient))
+    }
+
     /// Executes an immediate pay-per-use charge for an active subscription.
     ///
     /// # Parameters
@@ -579,7 +683,9 @@ impl FlowPay {
     /// # Panics
     /// - If `additional_seconds` is 0 (`IntervalMustBePositive`).
     /// - If the subscription is cancelled/inactive (`SubscriptionInactive`).
+    /// - If the subscription is paused (`SubscriptionPaused`).
     /// - If the subscription doesn't exist (`NoSubscriptionFound`).
+    /// - If `last_charged + additional_seconds` overflows `u64` (`ArithmeticOverflow`).
     pub fn extend_trial(env: Env, user: Address, additional_seconds: u64) {
         bump_instance_ttl(&env);
         user.require_auth();
@@ -587,6 +693,7 @@ impl FlowPay {
     }
 
     pub fn cancel_and_refund_prorated(env: Env, user: Address, merchant: Address) {
+        bump_instance_ttl(&env);
         user.require_auth();
         merchant.require_auth();
 
@@ -597,15 +704,37 @@ impl FlowPay {
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
+        if !sub.active {
+            env.panic_with_error(ContractError::SubscriptionInactive);
+        }
+        if sub.paused {
+            env.panic_with_error(ContractError::SubscriptionPaused);
+        }
+        if sub.merchant != merchant {
+            env.panic_with_error(ContractError::RefundMerchantMismatch);
+        }
+
         let now = env.ledger().timestamp();
         let elapsed = now.saturating_sub(sub.last_charged);
         let remaining = sub.interval.saturating_sub(elapsed);
+        if sub.interval == 0 {
+            env.panic_with_error(ContractError::IntervalMustBePositive);
+        }
         let refund = (sub.amount * i128::from(remaining)) / i128::from(sub.interval);
 
-        if refund > 0 {
-            token::Client::new(&env, &sub.token).transfer(&merchant, &user, &refund);
+        if refund <= 0 {
+            env.panic_with_error(ContractError::RefundAmountMustBePositive);
         }
 
+        // Refunds are merchant-funded; no protocol escrow is used. Validate the
+        // source balance before the transfer so an underfunded merchant cannot
+        // reach an opaque SAC failure or a partial cancellation.
+        let token_client = token::Client::new(&env, &sub.token);
+        if token_client.balance(&merchant) < refund {
+            env.panic_with_error(ContractError::InsufficientMerchantBalance);
+        }
+
+        token_client.transfer(&merchant, &user, &refund);
         cancel_inner(&env, &user);
         events::publish_cancelled_with_refund(&env, &user, refund);
     }
@@ -722,8 +851,18 @@ impl FlowPay {
             .get(&key)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoSubscriptionFound));
 
-        if !sub.active {
+        // Reject cancelled subscriptions (inactive and not paused).
+        // pause_until sets active=false while paused=true; those must still be resumable.
+        if !sub.active && !sub.paused {
             env.panic_with_error(ContractError::SubscriptionInactive);
+        }
+
+        // Recovery rule: if the grace window has closed the subscription is no longer
+        // chargeable. Resume is rejected to prevent false recoverability signals.
+        // The only allowed exit is cancel(); re-subscribe to restore chargeability.
+        // See docs/SUBSCRIBER-LIFECYCLE.md.
+        if grace::is_grace_lapsed(&env, &sub) {
+            env.panic_with_error(ContractError::ResumeGraceLapsed);
         }
 
         sub.paused = false;
@@ -837,6 +976,10 @@ impl FlowPay {
 
     pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         upgrade::propose_upgrade(&env, new_wasm_hash);
+    }
+
+    pub fn cancel_pending_upgrade(env: Env) {
+        upgrade::cancel_pending_upgrade(&env);
     }
 
     pub fn commit_upgrade(env: Env) {
@@ -1076,15 +1219,16 @@ impl FlowPay {
     }
 
     /// Adds multiple merchants to the whitelist in a single call.
-    /// Admin-only. Capped at 50 entries; duplicates are idempotent.
+    /// Admin-only. Duplicates are idempotent.
     /// Returns the number of entries processed.
+    ///
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50); panics with
+    /// `BatchTooLarge` above it.
     pub fn whitelist_batch_add(env: Env, merchants: Vec<Address>) -> u32 {
         admin::require_admin(&env);
 
-        // TODO: use configurable limit (see CONTRACT-16) once merged
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
 
         for merchant in merchants.iter() {
             whitelist::add_merchant(&env, &merchant);
@@ -1094,15 +1238,16 @@ impl FlowPay {
     }
 
     /// Removes multiple merchants from the whitelist in a single call.
-    /// Admin-only. Capped at 50 entries; removing a non-whitelisted merchant is a no-op.
+    /// Admin-only. Removing a non-whitelisted merchant is a no-op.
     /// Returns the number of entries processed.
+    ///
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50); panics with
+    /// `BatchTooLarge` above it.
     pub fn whitelist_batch_remove(env: Env, merchants: Vec<Address>) -> u32 {
         admin::require_admin(&env);
 
-        // TODO: use configurable limit (see CONTRACT-16) once merged
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
 
         for merchant in merchants.iter() {
             whitelist::remove_merchant(&env, &merchant);
@@ -1144,11 +1289,11 @@ impl FlowPay {
     }
 
     /// Returns the whitelist and freeze status for a batch of merchant addresses.
-    /// Capped at MAX_WHITELIST_BATCH_SIZE (50) per call.
+    /// Capped at the configurable whitelist batch limit
+    /// (`get_max_whitelist_batch_size`, default 50) so the read path and the
+    /// admin write paths share one number.
     pub fn get_merchant_statuses(env: Env, merchants: Vec<Address>) -> Vec<(Address, bool, bool)> {
-        if merchants.len() > MAX_WHITELIST_BATCH_SIZE {
-            env.panic_with_error(ContractError::BatchTooLarge);
-        }
+        whitelist::require_batch_within_limit(&env, merchants.len());
         let mut result = Vec::new(&env);
         for merchant in merchants.iter() {
             let whitelisted = whitelist::is_whitelisted(&env, &merchant);
@@ -1335,8 +1480,14 @@ impl FlowPay {
 
     /// Returns a list of subscriber addresses that are currently due for charging.
     /// Reads from the `SubscriberIndex` starting from `offset` up to `offset + limit`.
-    /// Capped at 50 per call.
-    pub fn get_next_charge_batch(env: Env, offset: u64, limit: u32) -> Vec<Address> {
+    /// Capped at 50 per call. Optionally filters out grace-lapsed subscriptions when
+    /// `exclude_lapsed` is `Some(true)` or `None`.
+    pub fn get_next_charge_batch(
+        env: Env,
+        offset: u64,
+        limit: u32,
+        exclude_lapsed: Option<bool>,
+    ) -> Vec<Address> {
         if limit > 50 {
             env.panic_with_error(ContractError::BatchTooLarge);
         }
@@ -1345,13 +1496,23 @@ impl FlowPay {
         if offset >= size || limit == 0 {
             return result;
         }
+        let exclude = exclude_lapsed.unwrap_or(true);
         let mut i = offset;
         let end = (offset + limit as u64).min(size);
         while i < end {
             if !subscription_count::is_subscriber_index_removed(&env, i) {
                 if let Some(addr) = env.storage().persistent().get::<DataKey, Address>(&DataKey::SubscriberIndex(i)) {
-                    if Self::is_charge_due(env.clone(), addr.clone()) {
-                        result.push_back(addr);
+                    if let Some(sub) = storage::get_subscription(&env, &addr) {
+                        if let Some(next) = charge_exec::compute_next_charge_at(&sub) {
+                            let now = env.ledger().timestamp();
+                            if now >= next {
+                                let grace = grace::get_grace_period(&env);
+                                let lapsed = grace > 0 && now > next + grace;
+                                if !exclude || !lapsed {
+                                    result.push_back(addr);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1406,6 +1567,32 @@ impl FlowPay {
         events::publish_subscriber_index_ttl_extended(&env, count);
     }
 
+    /// Admin-only repair: tombstones a single stale subscriber index slot.
+    ///
+    /// Looks up the occupant of `index`, refuses if that subscriber currently
+    /// has an active subscription, then marks the slot removed so keepers skip
+    /// it. This does **not** garbage-collect the rest of the index.
+    ///
+    /// # Auth
+    ///
+    /// Requires authorization from the contract admin.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `NoSubscriptionFound` if `index` is out of range, empty, or
+    /// already tombstoned. Panics with `CannotClearActiveSubscriber` if the
+    /// occupant still has an active subscription.
+    ///
+    /// # Side Effects
+    ///
+    /// Writes `SubscriberIndexRemoved(index)`, drops the reverse slot lookup
+    /// when it points at this index, and emits `subscriber_index_cleared`.
+    pub fn clear_subscriber_index_entry(env: Env, index: u64) {
+        admin::require_admin(&env);
+        let user = subscription_count::clear_subscriber_index_entry(&env, index);
+        events::publish_subscriber_index_cleared(&env, &user, index);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Merchant revenue
     // ─────────────────────────────────────────────────────────────
@@ -1458,9 +1645,8 @@ impl FlowPay {
             false
         };
 
-        let has_sufficient_allowance = soroban_sdk::token::Client::new(&env, &sub.token)
-            .allowance(&user, &env.current_contract_address())
-            >= sub.amount;
+        let has_sufficient_allowance =
+            validation::has_sufficient_allowance(&env, &user, &sub.token, sub.amount);
 
         let trial_active = trial::get_trial_end(env.clone(), user.clone()).is_some();
         let daily_limit_set = spending_limit::get_daily_limit(&env, &user).is_some();
@@ -1591,6 +1777,13 @@ impl FlowPay {
         spending_limit::get_daily_spent(&env, &user)
     }
 
+    /// Returns a consistent snapshot of a user's daily spending window.
+    /// `remaining` is `None` when no limit is configured and is clamped to
+    /// zero when spending has reached or exceeded the configured limit.
+    pub fn get_daily_limit_status(env: Env, user: Address) -> DailyLimitStatus {
+        spending_limit::get_daily_limit_status(&env, &user)
+    }
+
     // ─────────────────────────────────────────────
     // Referral tracking
     // ─────────────────────────────────────────────────────────────
@@ -1705,10 +1898,25 @@ impl FlowPay {
     // Admin setup
     // ─────────────────────────────────────────────────────────────
 
-    /// Sets the contract admin. Can only be called once; subsequent calls panic.
+    /// Bootstrap-only entrypoint that writes the contract admin when no admin
+    /// is configured. This is a narrower alternative to [`Self::initialize`]:
+    ///
+    /// - **`initialize(token, admin)`** atomically sets the default token *and*
+    ///   the admin together. Use this for standard deployments via
+    ///   `scripts/deploy-pipeline.ts` — it is the canonical full-init path.
+    /// - **`set_initial_admin(admin)`** sets only the admin slot. It is
+    ///   intended for partial-recovery or segmented-deploy scenarios where the
+    ///   token is written separately (or not at all), and admin-only governance
+    ///   is needed before full initialization.
+    ///
+    /// In both cases the proposed admin must sign the call via
+    /// `require_auth()`, and a second call on an already-configured contract
+    /// fails with a typed `ContractError::AdminAlreadySet` (code 42) so
+    /// deploy scripts can detect the condition without string-parsing panics.
     pub fn set_initial_admin(env: Env, admin: Address) {
+        admin.require_auth();
         if env.storage().instance().has(&DataKey::Admin) {
-            panic!("admin already set");
+            env.panic_with_error(ContractError::AdminAlreadySet);
         }
         storage::set_admin(&env, &admin);
     }
@@ -1757,15 +1965,6 @@ impl FlowPay {
             if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
                 if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
                     pending_merchant_rev_count += 1;
-        for i in 0..total_merchants {
-            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
-                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_rev_count += 1;
-        let mut pending_merchant_revenue_count = 0;
-        for i in 0..total_merchants {
-            if let Some(merchant) = env.storage().persistent().get(&DataKey::MerchantIndex(i)) {
-                if merchant_stats::get_merchant_revenue(&env, &merchant) > 0 {
-                    pending_merchant_revenue_count += 1;
                 }
             }
         }
@@ -1787,7 +1986,6 @@ impl FlowPay {
             fee_collector_set,
             global_volume_utilization_pct,
             pending_merchant_rev_count,
-            pending_merchant_revenue_count,
         }
     }
 
@@ -1838,6 +2036,7 @@ impl FlowPay {
     /// refreshes TTL, and emits `sub_transferred` and `subscription_transferred`.
     pub fn transfer_subscription(env: Env, user: Address, new_user: Address) {
         ensure_contract_not_paused(&env);
+        validation::require_valid_transfer_targets(&env, &user, &new_user);
         user.require_auth();
         new_user.require_auth();
 
@@ -1867,6 +2066,7 @@ impl FlowPay {
         env.storage().persistent().set(&new_key, &sub);
         env.storage().persistent().remove(&old_key);
 
+        subscription_count::transfer_subscriber_index(&env, &user, &new_user);
         extend_subscription_ttl(&env, &new_user);
 
         events::publish_subscription_transferred(&env, &user, &new_user);
@@ -1976,6 +2176,25 @@ impl FlowPay {
     /// at 50 per call, filtered to only those whose subscription is
     /// currently active. Avoids forcing callers to over-fetch via
     /// `get_subscriber_page` and filter client-side.
+    ///
+    /// # Pagination semantics (Issue #823)
+    ///
+    /// `offset` is a **slot index** in the append-only subscriber index, not
+    /// a result count. The function scans slots `[offset, offset+cap)` (where
+    /// `cap = min(limit, 50)`), skipping tombstoned and inactive entries.
+    /// Callers **must** advance `offset` by `cap` on each call to avoid
+    /// overlap or gaps:
+    ///
+    /// ```text
+    ///   page = get_active_subscriber_page(offset, limit)
+    ///   process(page)
+    ///   offset += cap   // cap = min(limit, 50)
+    /// ```
+    ///
+    /// A page may return fewer than `cap` results when slots are tombstoned
+    /// or contain inactive subscriptions. An empty page signals the end of
+    /// the index. The scan is bounded: at most `cap` slots are examined per
+    /// call, preventing unbounded iteration even on sparse indexes.
     pub fn get_active_subscriber_page(env: Env, offset: u64, limit: u32) -> Vec<Address> {
         let count = subscription_count::get_subscriber_index_size(&env);
         let cap: u32 = if limit > 50 { 50 } else { limit };
@@ -1983,8 +2202,13 @@ impl FlowPay {
         if offset >= count || cap == 0 {
             return result;
         }
+        let end = (offset + cap as u64).min(count);
         let mut i = offset;
-        while i < count && result.len() < cap {
+        while i < end {
+            if subscription_count::is_subscriber_index_removed(&env, i) {
+                i += 1;
+                continue;
+            }
             if let Some(addr) = env
                 .storage()
                 .persistent()
@@ -2102,6 +2326,7 @@ fn subscribe_inner(
     referrer: Option<Address>,
 ) {
     bump_instance_ttl(env);
+    validation::require_valid_subscribe_addresses(env, &user, &merchant);
     user.require_auth();
 
     if whitelist::is_whitelist_enabled(env) && !whitelist::is_whitelisted(env, &merchant) {
@@ -2185,15 +2410,26 @@ pub(crate) fn check_and_update_global_volume(env: &Env, amount: i128) {
             accumulated_volume: 0,
         });
 
-    if now >= window.current_window_start + HOUR_IN_SECONDS {
+    // Checked: a window start near u64::MAX must not wrap the rollover test
+    // into an accidental (or permanently suppressed) window reset.
+    let window_end = window
+        .current_window_start
+        .checked_add(HOUR_IN_SECONDS)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
+
+    if now >= window_end {
         window.current_window_start = now;
         window.accumulated_volume = 0;
     }
 
+    // Overflow and cap breach are distinct failure modes: an accumulator that
+    // cannot represent the sum is a typed `ArithmeticOverflow`, not a policy
+    // rejection, so clients can tell "the protocol is at its hourly cap" from
+    // "this amount is not representable".
     let new_volume = window
         .accumulated_volume
         .checked_add(amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::GlobalVolumeExceeded));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::ArithmeticOverflow));
 
     if new_volume > GLOBAL_MAX_VOLUME_PER_HOUR {
         env.panic_with_error(ContractError::GlobalVolumeExceeded);
@@ -2217,3 +2453,41 @@ fn ensure_contract_not_paused(env: &Env) {
         env.panic_with_error(ContractError::ContractPaused);
     }
 }
+
+
+fn check_and_update_global_volume(env: &Env, amount: i128) {
+    let now = env.ledger().timestamp();
+    let key = DataKey::GlobalVolumeWindow;
+
+    let mut window: GlobalVolumeWindow = env
+        .storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(GlobalVolumeWindow {
+            current_window_start: now,
+            accumulated_volume: 0,
+        });
+
+    // Reset window if hour boundary crossed
+    if now >= window.current_window_start + HOUR_IN_SECONDS {
+        window.current_window_start = now;
+        window.accumulated_volume = 0;
+    }
+
+    // Check if adding this amount would exceed the cap
+    let new_volume = window
+        .accumulated_volume
+        .checked_add(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::GlobalVolumeExceeded));
+
+    if new_volume > GLOBAL_MAX_VOLUME_PER_HOUR {
+        env.panic_with_error(ContractError::GlobalVolumeExceeded);
+    }
+
+    // Update and persist the new volume
+    window.accumulated_volume = new_volume;
+    env.storage()
+        .instance()
+        .set(&key, &window);
+}
+

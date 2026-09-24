@@ -310,7 +310,10 @@ describe("RPC failure banner in App", () => {
   // To avoid the full App render complexity, we test the banner logic in
   // isolation by rendering a minimal component that mirrors the App banner.
 
-  function MockBanner({ rpcStatus, onOpenSettings }: {
+  function MockBanner({
+    rpcStatus,
+    onOpenSettings,
+  }: {
     rpcStatus: "healthy" | "degraded" | "unreachable";
     onOpenSettings: () => void;
   }) {

@@ -171,12 +171,23 @@ env.ledger().with_mut(|l| {
 
 ## Frontend Tests
 
-Frontend tests run with Vitest:
+Frontend tests run with Vitest (configured in `frontend/vitest.config.ts` with jsdom environment):
 
 ```bash
 cd frontend
-npm run test
+npx vitest run
 ```
+
+To run in watch mode during development:
+
+```bash
+cd frontend
+npx vitest
+```
+
+> **Note:** The frontend `package.json` does not define a `test` script. Run Vitest directly via `npx vitest`. Vitest is listed as a devDependency and configured in `frontend/vitest.config.ts`.
+
+Test files live under `frontend/src/__tests__/` and use the `*.test.ts` / `*.test.tsx` naming convention. Vitest globals (`describe`, `it`, `expect`, `vi`) are enabled — no imports needed.
 
 ### Admin subscription repair panel
 
@@ -312,35 +323,37 @@ A live-mode testnet run is considered validated when the keeper's self-reported 
 
 Integration, E2E, and keeper testing all need funded testnet accounts with known subscription state — and re-creating that by hand (generate a keypair, fund it, remember which one is "the merchant") does not scale past a couple of manual runs and is not reproducible between contributors.
 
-[`scripts/testnet-setup.ts`](../scripts/testnet-setup.ts) solves this by deterministically deriving accounts from a `--seed`: the same seed always produces the same set of public/secret keypairs, and the script funds any of them that aren't already funded via Friendbot.
+[`scripts/testnet-setup.ts`](../scripts/testnet-setup.ts) solves this by initializing accounts and subscriptions based on the `deployments/manifest.json` parameters:
 
 ```bash
 cd scripts
 npm install
-npx tsx testnet-setup.ts --seed 1 --users 3 --merchants 1
+npx tsx testnet-setup.ts
 ```
 
 Expected output:
 
 ```text
-Setting up testnet fixtures: seed=1 users=3 merchants=1
+====================================================
+FlowPay Testnet Faucet & Environment Setup
+Reset Mode: NO
+RPC Endpoint: https://soroban-testnet.stellar.org
+====================================================
 
-Wrote manifest: /path/to/scripts/.testnet-manifest.1.json
-  user[0] GA5N...WTX — funding via Friendbot...
-  user[0] GA5N...WTX — funded
-  user[1] GBKM...U54 — funding via Friendbot...
-  user[1] GBKM...U54 — funded
-  merchant[0] GBWQ...DJIT — funding via Friendbot...
-  merchant[0] GBWQ...DJIT — funded
+Setting up testnet fixtures...
 
-Manifest: /path/to/scripts/.testnet-manifest.1.json
+Step 1: Funding test accounts via Friendbot...
+  [OK] Admin Account (GB...) is already funded.
+  ...
+
+Manifest: data/testnet-accounts.json
 Next step: use the Soroban CLI with these identities to call subscribe()/charge()
 against your deployed contract — see docs/TESTING.md, Integration Testing section.
 ```
 
-Re-running the same command reuses the existing manifest and reports each identity as `already funded` instead of re-funding it — safe to run repeatedly, including in CI or a setup script other contributors share.
+Re-running the script reuses the existing accounts and reports each identity as `already funded` instead of re-funding it.
 
-The generated manifest (`scripts/.testnet-manifest.<seed>.json`, gitignored) contains each identity's public **and secret** key and its role (`user` or `merchant`). Feed the secret keys to the Soroban CLI to actually invoke contract functions on their behalf, e.g.:
+The generated accounts manifest (`data/testnet-accounts.json`, gitignored) contains each identity's public **and secret** key and its role (`admin`, `merchant`, or `subscriber`). Feed the secret keys to the Soroban CLI to actually invoke contract functions on their behalf, e.g.:
 
 ```bash
 soroban contract invoke \
@@ -357,6 +370,71 @@ Use a distinct `--seed` per scenario you want to keep independent (e.g., `--seed
 
 ---
 
+## Scripts Testing
+
+The `scripts/` directory contains TypeScript tooling for keepers, monitoring, analytics, and deployment. Scripts have their own `package.json` and TypeScript configuration.
+
+### Scripts typecheck
+
+```bash
+cd scripts
+npm install
+npm run typecheck
+```
+
+This runs `tsc --noEmit` against the scripts `tsconfig.json` to catch type errors without emitting files.
+
+### Scripts build
+
+```bash
+cd scripts
+npm run build
+```
+
+This runs `tsc -p tsconfig.build.json` to produce compiled JavaScript output.
+
+### Fixture workflow
+
+[`scripts/testnet-setup.ts`](../scripts/testnet-setup.ts) creates deterministic test accounts from a `--seed` value, funds them via Friendbot, and writes a manifest file for use in integration/E2E testing.
+ [`scripts/testnet-setup.ts`](../scripts/testnet-setup.ts) initializes the testnet fixture accounts (Admin, Merchant, and 5 Subscribers) using the values in `deployments/manifest.json` as the source of truth for defaults.
+
+```bash
+cd scripts
+npm install
+npx tsx testnet-setup.ts [--reset] [--contractId <contractId>] [--tokenAddress <tokenAddress>] [--rpcUrl <rpcUrl>]
+```
+
+By default, the script reads configuration from `deployments/manifest.json`. You can supply optional CLI override flags that will take precedence:
+* `--reset`: Re-creates the testnet manifest from scratch, backing up any existing one.
+* `--contractId <id>`: Overrides the default manifest contract ID.
+* `--tokenAddress <address>`: Overrides the default manifest token address.
+* `--rpcUrl <url>`: Overrides the default manifest RPC URL.
+
+The generated credentials and subscription metadata are written to `data/testnet-accounts.json`. Re-running the script without `--reset` reuses the existing accounts.
+
+### Running individual scripts
+
+Scripts are run via `tsx` directly:
+
+```bash
+cd scripts
+npm install
+
+# Allowance monitoring
+npx tsx check-allowances.ts
+
+# Grace period monitoring
+npx tsx grace-period-monitor.ts
+
+# Health check
+npx tsx health-check.ts
+
+# Event watcher
+npx tsx watch-events.ts
+```
+
+---
+
 ## CI
 
 ### What runs in CI today
@@ -364,7 +442,7 @@ Use a distinct `--seed` per scenario you want to keep independent (e.g., `--seed
 | Workflow                                          | Steps                                                                | Covers                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`Backend (Rust)`](../.github/workflows/rust.yml) | `cargo clippy -- -D warnings`, `cargo build`, `cargo test --verbose` | All contract unit tests **and** the benchmark tests in `bench.rs` (they're plain `#[test]` functions, so `cargo test` runs them too — see [`docs/development/performance-benchmarking.md`](development/performance-benchmarking.md#ci-integration) for adding a dedicated `--nocapture` reporting step) |
-| [`Frontend`](../.github/workflows/frontend.yml)   | `npm ci`, `npm run lint`, `npx prettier --check .`, `npm run build`  | Linting, formatting, and a production build — note this workflow does **not** currently run `npm run test` (the Vitest suite) as a separate step; `npm run build` only type-checks and bundles                                                                                                          |
+| [`Frontend`](../.github/workflows/frontend.yml)   | `npm ci`, `npm run lint`, `npx prettier --check .`, `npm run build`  | Linting, formatting, and a production build — note this workflow does **not** currently run `npx vitest run` (the Vitest suite) as a separate step; `npm run build` only type-checks and bundles                                                                                                        |
 
 ### What requires manual testing
 
@@ -377,9 +455,9 @@ Nothing in CI touches a real network — there is no testnet RPC access from Git
 ### Adding a new CI test
 
 - **A new contract unit or benchmark test**: add it to `contract/src/test.rs` (or `bench.rs`) — it's picked up automatically by the existing `cargo test --verbose` step, no workflow change needed.
-- **A new frontend unit test**: add it under `frontend/src/**/__tests__/` — picked up automatically by Vitest's default discovery, but remember the `Frontend` workflow doesn't currently invoke `npm run test` at all (see table above); if you want frontend unit tests enforced in CI, add a step to [`.github/workflows/frontend.yml`](../.github/workflows/frontend.yml):
+- **A new frontend unit test**: add it under `frontend/src/__tests__/` — picked up automatically by Vitest's default discovery, but remember the `Frontend` workflow doesn't currently invoke Vitest at all (see table above); if you want frontend unit tests enforced in CI, add a step to [`.github/workflows/frontend.yml`](../.github/workflows/frontend.yml):
   ```yaml
   - name: Test
-    run: npm run test
+    run: npx vitest run
   ```
 - **A new integration/E2E/keeper check**: these require live testnet access and a funded account, which GitHub Actions doesn't have configured today. Automating any of them means provisioning a CI secret for a funded testnet keypair and accepting real network flakiness in CI — treat this as a deliberate infrastructure decision, not a drop-in workflow step, and discuss it in an issue before implementing it.
