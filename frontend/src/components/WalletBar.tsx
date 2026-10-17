@@ -4,6 +4,7 @@ import CopyButton from "./CopyButton";
 import NetworkBadge from "./NetworkBadge";
 import BalanceDisplay from "./BalanceDisplay";
 import NotificationCenter from "./NotificationCenter";
+import TxQueuePanel from "./TxQueuePanel";
 import { useTxQueue } from "../services/txQueue";
 import type { Notification } from "../hooks/useToast";
 
@@ -38,6 +39,7 @@ export default function WalletBar({
             {queueDepth} transaction{queueDepth > 1 ? "s" : ""} pending
           </div>
         )}
+        <TxQueuePanel />
         <div className="wallet-bar__connection">
           <span className="wallet-bar__label">
             Connected via {activeAdapter ? `${activeAdapter.icon} ${activeAdapter.name}` : "Wallet"}

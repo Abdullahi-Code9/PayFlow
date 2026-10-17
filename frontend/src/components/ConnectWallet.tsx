@@ -12,11 +12,20 @@ export default function ConnectWallet({ onConnect, error, loading = false }: Pro
     <div className="card connect-wallet">
       <p className="connect-wallet__hint">Connect a wallet to get started.</p>
 
-      <button onClick={onConnect} className="btn-primary w-full" disabled={loading}>
+      <button
+        onClick={onConnect}
+        className="btn-primary w-full"
+        disabled={loading}
+        aria-label={loading ? "Connecting…" : undefined}
+      >
         {loading ? <Spinner size="sm" /> : "Connect Wallet"}
       </button>
 
-      {error && <p className="text-danger mt-2">{error}</p>}
+      {error && (
+        <p role="alert" className="text-danger mt-2">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

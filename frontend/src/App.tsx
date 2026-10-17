@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useWallet, AVAILABLE_WALLETS } from "./hooks/useWallet";
 import { useAccessibility } from "./hooks/useAccessibility";
 import { useRpcHealthContext } from "./context/RpcHealthContext";
@@ -19,6 +19,9 @@ import ContractPauseBanner from "./components/ContractPauseBanner";
 import NetworkBadge from "./components/NetworkBadge";
 import AdminDashboard from "./pages/AdminDashboard";
 import type { WalletAdapter } from "./services/wallets/WalletAdapter";
+import ConnectWallet from "./components/ConnectWallet";
+import ShortcutHelpOverlay from "./components/ShortcutHelpOverlay";
+import { ShortcutRegistryContext } from "./context/ShortcutRegistry";
 
 type Tab = "dashboard" | "subscribe" | "merchant" | "admin";
 
@@ -30,6 +33,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [refresh, setRefresh] = useState(0);
   const [showRpcSettings, setShowRpcSettings] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const shortcutRegistry = useContext(ShortcutRegistryContext);
 
   const isRpcFailing = !healthy || circuitOpen;
   const {
@@ -51,6 +56,7 @@ export default function App() {
   const { notifications, unreadCount, markAllRead, clearNotifications } = useToast();
   const [showWalletModal, setShowWalletModal] = useState(false);
   const wasOnline = useRef(isOnline);
+  const closeShortcutHelp = useCallback(() => setShowShortcutHelp(false), []);
 
   // Announce connectivity changes via the ARIA live region (issue: disable
   // mutating CTAs while offline + announce status).
@@ -191,23 +197,11 @@ export default function App() {
 
       {/* Wallet connect */}
       {!publicKey ? (
-        <div className="card" style={{ textAlign: "center" }}>
-          <p style={{ color: "#94a3b8", marginBottom: 16, fontSize: 14 }}>
-            Connect a wallet to get started.
-          </p>
-          <button
-            onClick={() => setShowWalletModal(true)}
-            disabled={connecting}
-            style={{ background: "#7c3aed", color: "#fff" }}
-          >
-            {connecting ? "Connecting…" : "Connect Wallet"}
-          </button>
-          {error && (
-            <p role="alert" style={{ color: "var(--color-danger)", marginTop: 12, fontSize: 13 }}>
-              {error}
-            </p>
-          )}
-        </div>
+        <ConnectWallet
+          onConnect={() => setShowWalletModal(true)}
+          error={error}
+          loading={connecting}
+        />
       ) : (
         <>
           {/* Connected bar — shows adapter name/icon, address, disconnect */}
@@ -222,7 +216,20 @@ export default function App() {
           />
 
           {/* Tab navigation — admin tab only visible to contract admin */}
-          <TabBar tabs={visibleTabs} activeTab={tab} onTabChange={setTab} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TabBar tabs={visibleTabs} activeTab={tab} onTabChange={setTab} />
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              aria-label="Show keyboard shortcuts"
+              title="Keyboard shortcuts"
+              onClick={() => setShowShortcutHelp(true)}
+            >
+              ?
+            </button>
+          </div>
 
           {/* Content */}
           <div className="card" style={{ marginTop: 20 }}>
@@ -276,6 +283,12 @@ export default function App() {
           onClose={() => setShowWalletModal(false)}
           connectionStatus={connectionStatus}
           error={error}
+        />
+      )}
+      {showShortcutHelp && (
+        <ShortcutHelpOverlay
+          shortcuts={shortcutRegistry?.shortcuts ?? []}
+          onClose={closeShortcutHelp}
         />
       )}
     </div>

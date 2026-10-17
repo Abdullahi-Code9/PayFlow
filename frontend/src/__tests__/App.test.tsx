@@ -105,6 +105,16 @@ vi.mock("../hooks/useWallet", () => {
 import App from "../App";
 import { useWallet, AVAILABLE_WALLETS } from "../hooks/useWallet";
 import { useAdmin } from "../hooks/useAdmin";
+import { ShortcutRegistryProvider, useRegisterShortcuts } from "../context/ShortcutRegistry";
+
+const REGISTERED_TEST_SHORTCUT = [
+  { key: "x", description: "Cancel subscription", action: vi.fn() },
+];
+
+function AppWithRegisteredShortcut() {
+  useRegisterShortcuts(REGISTERED_TEST_SHORTCUT);
+  return <App />;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -321,5 +331,28 @@ describe("App — tab shell navigation", () => {
     mockUseWallet({});
     render(<App />);
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  });
+
+  it("shows registered shortcuts and restores focus when help closes with Escape", async () => {
+    mockUseWallet(CONNECTED_STATE);
+    render(
+      <ShortcutRegistryProvider>
+        <AppWithRegisteredShortcut />
+      </ShortcutRegistryProvider>
+    );
+
+    const trigger = screen.getByRole("button", { name: "Show keyboard shortcuts" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+    expect(screen.getByText("Cancel subscription")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger);
+    });
   });
 });

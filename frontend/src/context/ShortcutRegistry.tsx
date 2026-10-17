@@ -68,12 +68,14 @@ export function ShortcutRegistryProvider({ children }: { children: React.ReactNo
 export function useRegisterShortcuts(shortcuts: KeyboardShortcut[]) {
   const context = useContext(ShortcutRegistryContext);
   const id = useId();
+  const registerShortcuts = context?.registerShortcuts;
+  const unregisterShortcuts = context?.unregisterShortcuts;
 
   useEffect(() => {
-    if (!context) return;
-    context.registerShortcuts(id, shortcuts);
+    if (!registerShortcuts || !unregisterShortcuts) return;
+    registerShortcuts(id, shortcuts);
     return () => {
-      context.unregisterShortcuts(id);
+      unregisterShortcuts(id);
     };
-  }, [id, shortcuts, context]);
+  }, [id, shortcuts, registerShortcuts, unregisterShortcuts]);
 }
